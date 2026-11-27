@@ -64,7 +64,7 @@ export default function ConfiguracoesPage() {
         </Card>
 
         <Card title="Importar dados">
-          <p className="text-sm text-mute">Traz clientes, histórico de vendas e influencers de outra plataforma (ex.: Kairós), sem duplicar o que já existe.</p>
+          <p className="text-sm text-mute">Suba uma planilha (.xlsx ou .csv) com clientes e vendas ou com influencers. Confere antes de gravar e não duplica o que já existe.</p>
           <a href={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/importar/`} className="mt-3 inline-flex rounded-lg border border-line px-3.5 py-2 text-sm hover:border-gold/60">Abrir importação</a>
         </Card>
 
