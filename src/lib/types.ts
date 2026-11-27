@@ -47,6 +47,8 @@ export interface Channel {
   name: string;
   order: number;
   active: boolean;
+  /** hunter = aquisição (cliente novo) · farmer = retenção (renovação, winning back) */
+  kind?: 'hunter' | 'farmer';
 }
 
 export type ClientStatus = 'ativo' | 'inativo' | 'cancelado' | 'rascunho';
@@ -71,6 +73,8 @@ export interface Client {
   startDate?: string;
   endDate?: string;
   lastValue?: number;
+  /** Período do plano vigente (para o MRR) */
+  period?: Period;
   /** Último contato sobre renovação (YYYY-MM-DD) */
   renewalContactAt?: string;
   deleted?: boolean;
@@ -124,6 +128,20 @@ export interface Plan {
 
 export type SaleStatus = 'aprovada' | 'pendente' | 'estornada';
 
+/** Tipo da venda: nova, renovação ou troca de plano no meio do ciclo */
+export type SaleKind = 'nova' | 'renovacao' | 'troca';
+
+/** Como a cliente paga você (fora o parcelamento da maquininha) */
+export type PaymentMode = 'avista' | 'sinal' | 'parcelado';
+
+export interface Part {
+  due: string; // YYYY-MM-DD
+  amount: number;
+  status: 'pago' | 'pendente';
+  /** Data em que entrou o dinheiro (define o mês no caixa) */
+  paidAt?: string;
+}
+
 export interface Sale {
   id: string;
   clientId: string;
@@ -145,7 +163,14 @@ export interface Sale {
   influencerId?: string;
   referredById?: string;
   isRenewal: boolean;
+  /** Ausente em vendas antigas: deduzido de isRenewal */
+  kind?: SaleKind;
+  /** Plano/valor anterior, em trocas e renovações (para a taxa de ascensão) */
+  prevPlanName?: string;
   status: SaleStatus;
+  paymentMode?: PaymentMode;
+  /** Parcelas a receber (sinal + restante ou parcelado). Vazio = à vista */
+  parts?: Part[];
   paymentMethod: PaymentMethod;
   installments: number;
   /** Copiado do cliente: vendas de cliente de teste não entram nos indicadores */

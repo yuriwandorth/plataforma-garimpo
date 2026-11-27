@@ -1,5 +1,5 @@
 // Regras de cálculo dos indicadores. Funções puras: fáceis de testar (tests/calc.test.ts).
-import type { ChannelGoal, Client, Period, Sale, WeekGoal } from './types';
+import type { Channel, ChannelGoal, Client, Part, Period, Sale, SaleKind, WeekGoal } from './types';
 import { PERIOD_MONTHS } from './types';
 
 export const TZ = 'America/Recife';
@@ -223,7 +223,7 @@ export function isActiveClient(c: Client, today: string): boolean {
 /** Clientes novos no mês = primeira venda (não renovação) aprovada no mês */
 export function newClientsInMonth(sales: Sale[], y: number, m: number): number {
   const ids = new Set(
-    sales.filter((s) => countable(s) && !s.isRenewal && sameMonth(s.date, y, m)).map((s) => s.clientId),
+    sales.filter((s) => countable(s) && (s.kind ?? (s.isRenewal ? 'renovacao' : 'nova')) === 'nova' && sameMonth(s.date, y, m)).map((s) => s.clientId),
   );
   return ids.size;
 }
@@ -323,4 +323,165 @@ export function toCSV(rows: (string | number | undefined | null)[][]): string {
         .join(';'),
     )
     .join('\n');
+}
+
+// ======================= Renovações, cobranças e desempenho avançado =======================
+
+export function saleKind(s: Sale): SaleKind {
+  return s.kind ?? (s.isRenewal ? 'renovacao' : 'nova');
+}
+
+export function monthBounds(y: number, m: number) {
+  return { start: iso(y, m, 1), end: iso(y, m, daysInMonth(y, m)) };
+}
+
+/** Renovações do mês de referência (como a Kairós) */
+export function renewalMonth(clients: Client[], sales: Sale[], y: number, m: number, today: string) {
+  const { start, end } = monthBounds(y, m);
+  const toRenew = clients
+    .filter((c) => !c.deleted && !c.isTest && c.status === 'ativo' && c.endDate && c.endDate >= start && c.endDate <= end)
+    .sort((a, b) => (a.endDate! < b.endDate! ? -1 : 1));
+  const renewed = sales
+    .filter((s) => countable(s) && saleKind(s) === 'renovacao' && s.date >= start && s.date <= end)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+  const renewedValue = renewed.reduce((a, s) => a + s.gross, 0);
+  return {
+    toRenew,
+    renewed,
+    renewedValue,
+    estimatedRevenue: toRenew.reduce((a, c) => a + (c.lastValue ?? 0), 0),
+    overdue: toRenew.filter((c) => c.endDate! < today).length,
+    /** renovadas ÷ (renovadas + ainda a renovar) */
+    rate: renewed.length + toRenew.length ? renewed.length / (renewed.length + toRenew.length) : null,
+  };
+}
+
+export interface PartRow extends Part {
+  saleId: string;
+  index: number;
+  total: number;
+  clientId: string;
+  clientName: string;
+  planName: string;
+}
+
+export function allParts(sales: Sale[]): PartRow[] {
+  return sales
+    .filter((s) => s.status !== 'estornada' && !s.isTest && s.parts?.length)
+    .flatMap((s) => s.parts!.map((p, i) => ({ ...p, saleId: s.id, index: i, total: s.parts!.length, clientId: s.clientId, clientName: s.clientName, planName: s.planName })));
+}
+
+/** Cobranças do mês: parcelas a receber, recebidas, inadimplência e saldo em aberto (todos os meses) */
+export function receivables(sales: Sale[], y: number, m: number, today: string) {
+  const { start, end } = monthBounds(y, m);
+  const parts = allParts(sales);
+  const dueInMonth = parts.filter((p) => p.due >= start && p.due <= end);
+  const pending = dueInMonth.filter((p) => p.status === 'pendente').sort((a, b) => (a.due < b.due ? -1 : 1));
+  const received = parts.filter((p) => p.status === 'pago' && (p.paidAt ?? p.due) >= start && (p.paidAt ?? p.due) <= end);
+  const overdue = pending.filter((p) => p.due < today);
+  const dueValue = dueInMonth.reduce((a, p) => a + p.amount, 0);
+  const overdueValue = overdue.reduce((a, p) => a + p.amount, 0);
+  const open = parts.filter((p) => p.status === 'pendente');
+  return {
+    pending,
+    received,
+    pendingValue: pending.reduce((a, p) => a + p.amount, 0),
+    receivedValue: received.reduce((a, p) => a + p.amount, 0),
+    overdue,
+    overdueValue,
+    delinquency: dueValue ? overdueValue / dueValue : null,
+    openBalance: open.reduce((a, p) => a + p.amount, 0),
+    openClients: new Set(open.map((p) => p.clientId)).size,
+  };
+}
+
+/** Divide um total em parcelas: sinal (pago na data) + restante, ou N parcelas mensais iguais */
+export function buildParts(total: number, mode: 'sinal' | 'parcelado', count: number, firstDue: string, signal?: number): Part[] {
+  const n = Math.max(2, Math.min(24, Math.round(count)));
+  const parts: Part[] = [];
+  if (mode === 'sinal') {
+    const sig = Math.min(total, Math.max(0, signal ?? Math.round((total / n) * 100) / 100));
+    parts.push({ due: firstDue, amount: sig, status: 'pago', paidAt: firstDue });
+    const rest = total - sig;
+    const each = Math.floor((rest / (n - 1)) * 100) / 100;
+    for (let i = 1; i < n; i++) {
+      const amount = i === n - 1 ? Math.round((rest - each * (n - 2)) * 100) / 100 : each;
+      parts.push({ due: addMonths(firstDue, i), amount, status: 'pendente' });
+    }
+  } else {
+    const each = Math.floor((total / n) * 100) / 100;
+    for (let i = 0; i < n; i++) {
+      const amount = i === n - 1 ? Math.round((total - each * (n - 1)) * 100) / 100 : each;
+      parts.push({ due: addMonths(firstDue, i), amount, status: i === 0 ? 'pago' : 'pendente', paidAt: i === 0 ? firstDue : undefined });
+    }
+  }
+  return parts;
+}
+
+/** Taxa de ascensão: em cada renovação ou troca, a cliente pagou mais, igual ou menos que antes? */
+export function upgradeStats(sales: Sale[]) {
+  const byClient = new Map<string, Sale[]>();
+  sales.filter(countable).forEach((s) => { const l = byClient.get(s.clientId) ?? []; l.push(s); byClient.set(s.clientId, l); });
+  let up = 0, same = 0, down = 0;
+  const ups: { clientName: string; from: string; to: string; fromValue: number; toValue: number; diff: number; date: string }[] = [];
+  byClient.forEach((list) => {
+    list.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.createdAt - b.createdAt));
+    for (let i = 1; i < list.length; i++) {
+      const k = saleKind(list[i]);
+      if (k === 'nova') continue;
+      const prev = list[i - 1], cur = list[i];
+      if (cur.gross > prev.gross) {
+        up++;
+        ups.push({ clientName: cur.clientName, from: prev.planName, to: cur.planName, fromValue: prev.gross, toValue: cur.gross, diff: cur.gross - prev.gross, date: cur.date });
+      } else if (cur.gross === prev.gross) same++;
+      else down++;
+    }
+  });
+  const total = up + same + down;
+  return { up, same, down, total, rate: total ? up / total : null, ups: ups.sort((a, b) => (a.date < b.date ? 1 : -1)) };
+}
+
+/** MRR: valor de cada cliente ativa dividido pelos meses do plano */
+export function mrr(clients: Client[], today: string): { value: number; count: number } {
+  const act = clients.filter((c) => isActiveClient(c, today) && c.lastValue);
+  const months = { mensal: 1, trimestral: 3, semestral: 6, anual: 12 } as const;
+  return { value: act.reduce((a, c) => a + c.lastValue! / months[c.period ?? 'mensal'], 0), count: act.length };
+}
+
+/** Comparação por semana com o mês anterior + canal com maior queda em cada semana */
+export function weeklyCompare(sales: Sale[], y: number, m: number) {
+  const pm = prevMonth(y, m);
+  const cur = weekRanges(y, m), prev = weekRanges(pm.y, pm.m);
+  const sumBy = (list: Sale[]) => {
+    const g: Record<string, number> = {};
+    list.forEach((s) => { g[s.channelId ?? ''] = (g[s.channelId ?? ''] ?? 0) + net(s); });
+    return g;
+  };
+  return cur.map((w, i) => {
+    const a = salesBetween(sales, w.start, w.end).filter(countable);
+    const b = salesBetween(sales, prev[i].start, prev[i].end).filter(countable);
+    const ca = sumBy(a), cb = sumBy(b);
+    let worst: { channelId: string; drop: number } | null = null;
+    Object.keys(cb).forEach((k) => {
+      const drop = cb[k] ? ((ca[k] ?? 0) - cb[k]) / cb[k] : 0;
+      if (drop < 0 && (!worst || drop < worst.drop)) worst = { channelId: k, drop };
+    });
+    const value = a.reduce((x, s) => x + net(s), 0);
+    const prevValue = b.reduce((x, s) => x + net(s), 0);
+    return { label: w.label, value, count: a.length, prevValue, delta: delta(value, prevValue), worst: worst as { channelId: string; drop: number } | null };
+  });
+}
+
+export const DEFAULT_FARMER = new Set(['renovacao', 'winning-back']);
+export function channelKind(c: Pick<Channel, 'id' | 'kind'> | undefined, id: string): 'hunter' | 'farmer' {
+  return c?.kind ?? (DEFAULT_FARMER.has(id) ? 'farmer' : 'hunter');
+}
+
+/** Receita do mês agrupada por uma chave, com contagem e % do total */
+export function groupRevenue(sales: Sale[], key: (s: Sale) => string) {
+  const ok = sales.filter(countable);
+  const total = ok.reduce((a, s) => a + net(s), 0);
+  const g = new Map<string, { value: number; count: number }>();
+  ok.forEach((s) => { const k = key(s); const v = g.get(k) ?? { value: 0, count: 0 }; v.value += net(s); v.count++; g.set(k, v); });
+  return [...g.entries()].map(([k, v]) => ({ key: k, ...v, share: total ? v.value / total : 0 })).sort((a, b) => b.value - a.value);
 }

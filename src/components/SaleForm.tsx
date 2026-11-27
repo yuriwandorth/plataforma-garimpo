@@ -1,12 +1,12 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { planEndDate, todayISO, parseMoney, fmtBRL2 } from '@/lib/calc';
+import { addDays, buildParts, planEndDate, todayISO, parseMoney, fmtBRL2 } from '@/lib/calc';
 import { useWriter } from '@/lib/db';
 import { useChannels, useClients, useMembers, usePlans, useProducts } from '@/lib/hooks';
-import type { Client, PaymentMethod, Sale, SaleStatus } from '@/lib/types';
+import type { Client, Part, PaymentMethod, PaymentMode, Sale, SaleKind, SaleStatus } from '@/lib/types';
 import { PERIOD_LABEL } from '@/lib/types';
 import { useSession } from '@/lib/auth';
-import { Button, Field, Modal, Toggle } from './ui';
+import { Button, Field, Modal } from './ui';
 
 interface Props {
   open: boolean;
@@ -17,9 +17,11 @@ interface Props {
   sale?: Sale;
   /** Vendas do cliente, para detectar renovação */
   clientSales?: Sale[];
+  /** Tipo sugerido ao abrir (ex.: Marcar renovado, Trocar de plano) */
+  initialKind?: SaleKind;
 }
 
-export function SaleForm({ open, onClose, client, sale, clientSales }: Props) {
+export function SaleForm({ open, onClose, client, sale, clientSales, initialKind }: Props) {
   const { user } = useSession();
   const w = useWriter();
   const clients = useClients();
@@ -39,7 +41,13 @@ export function SaleForm({ open, onClose, client, sale, clientSales }: Props) {
   const [channelId, setChannelId] = useState('');
   const [sellerId, setSellerId] = useState('');
   const [referredById, setReferredById] = useState('');
-  const [isRenewal, setIsRenewal] = useState(false);
+  const [kind, setKind] = useState<SaleKind>('nova');
+  const isRenewal = kind === 'renovacao';
+  const setIsRenewal = (v: boolean) => setKind(v ? 'renovacao' : 'nova');
+  const [mode, setMode] = useState<PaymentMode>('avista');
+  const [partsCount, setPartsCount] = useState(2);
+  const [signal, setSignal] = useState('');
+  const [parts, setParts] = useState<Part[]>([]);
   const [status, setStatus] = useState<SaleStatus>('aprovada');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
   const [installments, setInstallments] = useState(1);
@@ -55,15 +63,23 @@ export function SaleForm({ open, onClose, client, sale, clientSales }: Props) {
       setClientId(sale.clientId); setPlanId(sale.planId); setGross(String(sale.gross).replace('.', ','));
       setFees(String(sale.fees ?? 0).replace('.', ',')); setDate(sale.date); setStartDate(sale.startDate); setEndDate(sale.endDate);
       setChannelId(sale.channelId ?? ''); setSellerId(sale.sellerId ?? ''); setReferredById(sale.referredById ?? '');
-      setIsRenewal(sale.isRenewal); setStatus(sale.status); setPaymentMethod(sale.paymentMethod);
+      setKind(sale.kind ?? (sale.isRenewal ? 'renovacao' : 'nova')); setStatus(sale.status); setPaymentMethod(sale.paymentMethod);
+      setMode(sale.paymentMode ?? 'avista'); setParts(sale.parts ?? []); setPartsCount(Math.max(2, sale.parts?.length ?? 2));
       setInstallments(sale.installments || 1); setNotes(sale.notes ?? '');
     } else {
       const t = todayISO();
       setClientId(client?.id ?? ''); setPlanId(''); setGross(''); setFees('0'); setDate(t); setStartDate(t); setEndDate('');
       setChannelId(client?.channelId ?? ''); setSellerId(client?.sellerId ?? ''); setReferredById(client?.referredById ?? '');
-      const hasPrev = (clientSales ?? []).some((s) => s.status === 'aprovada');
-      setIsRenewal(hasPrev); setStatus('aprovada'); setPaymentMethod('pix'); setInstallments(1); setNotes('');
-      if (hasPrev) setChannelId('renovacao');
+      const hasPrev = (clientSales ?? []).some((s) => s.status === 'aprovada') || !!client?.planId;
+      const k: SaleKind = initialKind ?? (hasPrev ? 'renovacao' : 'nova');
+      setKind(k); setStatus('aprovada'); setPaymentMethod('pix'); setInstallments(1); setNotes('');
+      setMode('avista'); setParts([]); setPartsCount(2); setSignal('');
+      if (k === 'renovacao') {
+        setChannelId('renovacao');
+        // renovação continua do vencimento anterior: o vencimento avança
+        if (client?.endDate) setStartDate(addDays(client.endDate, 1));
+      }
+      if (k !== 'nova' && client?.planId) setPlanId('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sale?.id, client?.id]);
@@ -96,13 +112,20 @@ export function SaleForm({ open, onClose, client, sale, clientSales }: Props) {
     const value = parseMoney(gross);
     if (!value) return setErr('Informe o valor.');
     if (!endDate || endDate < startDate) return setErr('Confira as datas de início e vencimento.');
+    if (mode !== 'avista') {
+      const sum = Math.round(parts.reduce((a, p) => a + p.amount, 0) * 100) / 100;
+      if (!parts.length) return setErr('Gere as parcelas do recebimento.');
+      if (Math.abs(sum - value) > 0.01) return setErr(`As parcelas somam ${fmtBRL2(sum)}, mas a venda é ${fmtBRL2(value)}.`);
+    }
     setBusy(true);
     try {
       const data: Omit<Sale, 'id' | 'createdAt'> & { createdAt?: number } = {
         clientId: selectedClient.id, clientName: selectedClient.name, planId: plan.id, planName: plan.name,
         productId: plan.productId, period: plan.period, gross: value, fees: parseMoney(fees), date, startDate, endDate,
         channelId: channelId || undefined, sellerId: sellerId || undefined, referredById: referredById || undefined,
-        isRenewal, status, paymentMethod, installments, isTest: !!selectedClient.isTest, notes: notes || undefined,
+        isRenewal, kind, prevPlanName: kind !== 'nova' ? selectedClient.planName : undefined,
+        paymentMode: mode, parts: mode === 'avista' ? [] : parts.map((p) => (p.status === 'pago' ? { ...p, paidAt: p.paidAt || p.due } : { due: p.due, amount: p.amount, status: p.status })),
+        status, paymentMethod, installments, isTest: !!selectedClient.isTest, notes: notes || undefined,
         createdBy: sale?.createdBy ?? user!.uid,
       };
       if (sale) await w.update<Sale>('sales', sale.id, data, `Venda editada: ${selectedClient.name} · ${plan.name}`);
@@ -111,7 +134,7 @@ export function SaleForm({ open, onClose, client, sale, clientSales }: Props) {
       // Mantém o plano vigente na ficha do cliente quando a venda é aprovada e é a mais recente
       if (status === 'aprovada' && (!selectedClient.endDate || endDate >= selectedClient.endDate)) {
         await w.update<Client>('clients', selectedClient.id, {
-          planId: plan.id, planName: plan.name, startDate, endDate, lastValue: value,
+          planId: plan.id, planName: plan.name, startDate, endDate, lastValue: value, period: plan.period,
           status: 'ativo', channelId: selectedClient.channelId || channelId || undefined,
           sellerId: selectedClient.sellerId || sellerId || undefined,
           referredById: selectedClient.referredById || referredById || undefined,
@@ -212,8 +235,50 @@ export function SaleForm({ open, onClose, client, sale, clientSales }: Props) {
             <input className="input" type="number" min={1} max={12} value={installments} onChange={(e) => setInstallments(Math.max(1, Math.min(12, Number(e.target.value) || 1)))} />
           </Field>
         </div>
-        <div className="sm:col-span-2">
-          <Toggle checked={isRenewal} onChange={setIsRenewal} label="É renovação" hint="Marcado sozinho quando o cliente já tem venda aprovada antes. Renovação não conta como cliente novo." />
+        <Field label="Tipo da venda" className="sm:col-span-2" hint="Renovação e troca de plano não contam como cliente novo. A troca é a mudança de plano no meio do ciclo (ex.: upgrade).">
+          <div className="grid gap-2 sm:grid-cols-3">
+            {([['nova', 'Nova venda'], ['renovacao', 'Renovação'], ['troca', 'Troca de plano']] as [SaleKind, string][]).map(([k, l]) => (
+              <button key={k} type="button" onClick={() => { setKind(k); if (k === 'renovacao' && !channelId) setChannelId('renovacao'); }}
+                className={`rounded-lg border px-3 py-2 text-sm ${kind === k ? 'border-gold bg-gold/15 font-medium' : 'border-line text-mute hover:text-ink'}`}>{l}</button>
+            ))}
+          </div>
+        </Field>
+        <div className="sm:col-span-2 rounded-lg border border-line p-3">
+          <span className="label">Como a cliente paga você</span>
+          <div className="mb-2 grid gap-2 sm:grid-cols-3">
+            {([['avista', 'À vista', 'Entra inteiro no caixa na data da venda.'], ['sinal', 'Sinal + restante', 'Parte agora, o resto em parcelas mensais.'], ['parcelado', 'Parcelado', 'Parcelas mensais que você cobra (fora a maquininha).']] as [PaymentMode, string, string][]).map(([k, l, h]) => (
+              <button key={k} type="button" onClick={() => { setMode(k); if (k !== 'avista') setParts(buildParts(parseMoney(gross), k, partsCount, date, parseMoney(signal) || undefined)); else setParts([]); }}
+                className={`rounded-lg border px-3 py-2 text-left text-sm ${mode === k ? 'border-gold bg-gold/15' : 'border-line text-mute hover:text-ink'}`}>
+                <span className="block font-medium">{l}</span><span className="block text-xs text-mute">{h}</span>
+              </button>
+            ))}
+          </div>
+          {mode !== 'avista' && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="block"><span className="label">{mode === 'sinal' ? 'Parcelas (sinal + restante)' : 'Total de parcelas'}</span>
+                  <input className="input w-24" type="number" min={2} max={24} value={partsCount} onChange={(e) => setPartsCount(Math.max(2, Math.min(24, Number(e.target.value) || 2)))} /></label>
+                {mode === 'sinal' && <label className="block"><span className="label">Valor do sinal (R$)</span>
+                  <input className="input w-32" inputMode="decimal" value={signal} onChange={(e) => setSignal(e.target.value)} placeholder="dividir igual" /></label>}
+                <Button type="button" variant="outline" onClick={() => setParts(buildParts(parseMoney(gross), mode, partsCount, date, parseMoney(signal) || undefined))}>Gerar parcelas</Button>
+              </div>
+              {parts.map((p, i) => (
+                <div key={i} className="grid grid-cols-2 gap-2 rounded-lg bg-line/30 p-2 sm:grid-cols-4">
+                  <label className="block"><span className="label">{mode === 'sinal' && i === 0 ? 'Sinal · vencimento' : `Parcela ${i + 1} · vencimento`}</span>
+                    <input className="input" type="date" value={p.due} onChange={(e) => setParts(parts.map((x, j) => j === i ? { ...x, due: e.target.value } : x))} /></label>
+                  <label className="block"><span className="label">Valor (R$)</span>
+                    <input className="input" inputMode="decimal" defaultValue={String(p.amount).replace('.', ',')} key={`${i}-${p.amount}`} onBlur={(e) => setParts(parts.map((x, j) => j === i ? { ...x, amount: parseMoney(e.target.value) } : x))} /></label>
+                  <label className="block"><span className="label">Situação</span>
+                    <select className="input" value={p.status} onChange={(e) => setParts(parts.map((x, j) => j === i ? { ...x, status: e.target.value as Part['status'], paidAt: e.target.value === 'pago' ? (x.paidAt || x.due) : undefined } : x))}>
+                      <option value="pendente">Pendente</option><option value="pago">Pago</option>
+                    </select></label>
+                  {p.status === 'pago' && <label className="block"><span className="label">Pago em</span>
+                    <input className="input" type="date" value={p.paidAt ?? ''} onChange={(e) => setParts(parts.map((x, j) => j === i ? { ...x, paidAt: e.target.value } : x))} /></label>}
+                </div>
+              ))}
+              {parts.length > 0 && <p className="text-xs text-mute">Soma das parcelas: {fmtBRL2(parts.reduce((a, p) => a + p.amount, 0))} de {fmtBRL2(parseMoney(gross))} · a data "Pago em" define em que mês o valor entra no caixa.</p>}
+            </div>
+          )}
         </div>
         <Field label="Observação" className="sm:col-span-2"><textarea className="input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
       </div>

@@ -6,7 +6,7 @@ import { useSession } from '@/lib/auth';
 import { useWriter } from '@/lib/db';
 import { useChannels } from '@/lib/hooks';
 import { clearSeed, loadSeed } from '@/lib/seed';
-import { fmtBRL, parseMoney } from '@/lib/calc';
+import { channelKind, fmtBRL, parseMoney } from '@/lib/calc';
 import { Badge, Button, Card, Field, PageHeader } from '@/components/ui';
 
 export default function ConfiguracoesPage() {
@@ -58,7 +58,7 @@ export default function ConfiguracoesPage() {
         </Card>
 
         <Card title="Canais de venda">
-          <p className="mb-3 text-sm text-mute">Desativar um canal tira ele das metas e da escolha em novas vendas; o histórico continua.</p>
+          <p className="mb-3 text-sm text-mute">Desativar um canal tira ele das metas e da escolha em novas vendas; o histórico continua. Clique no tipo para alternar entre hunter (traz cliente nova) e farmer (retém quem já é cliente).</p>
           <ul className="mb-3 divide-y divide-line">
             {channels.data.map((c, i) => (
               <li key={c.id} className="flex items-center justify-between gap-2 py-2">
@@ -72,6 +72,9 @@ export default function ConfiguracoesPage() {
                   <Button size="sm" variant="ghost" onClick={() => {
                     const n = prompt('Novo nome do canal', c.name); if (n?.trim()) w.set('channels', c.id, { name: n.trim() });
                   }}>Renomear</Button>
+                  <Button size="sm" variant="ghost" onClick={() => w.set('channels', c.id, { kind: channelKind(c, c.id) === 'hunter' ? 'farmer' : 'hunter' })}>
+                    {channelKind(c, c.id) === 'hunter' ? 'Hunter (aquisição)' : 'Farmer (retenção)'}
+                  </Button>
                   <Button size="sm" variant="ghost" onClick={() => w.set('channels', c.id, { active: !c.active })}>{c.active ? 'Desativar' : 'Ativar'}</Button>
                 </span>
               </li>

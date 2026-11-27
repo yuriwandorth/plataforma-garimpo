@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { where } from 'firebase/firestore';
 import { useCollection, useWriter } from '@/lib/db';
 import { useChannels, useClients, useMembers } from '@/lib/hooks';
-import { fmtBRL, fmtDate, totals, todayISO, daysBetween } from '@/lib/calc';
-import type { Client, ClientStatus, Sale } from '@/lib/types';
+import { fmtBRL, fmtBRL2, fmtDate, totals, todayISO, daysBetween, saleKind } from '@/lib/calc';
+import type { Client, ClientStatus, Sale, SaleKind } from '@/lib/types';
 import { PERIOD_LABEL } from '@/lib/types';
 import { useSession } from '@/lib/auth';
 import { Badge, Button, Field, Modal, Tabs, Toggle } from './ui';
@@ -34,6 +34,7 @@ export function ClientModal({ open, onClose, client, initialDraft }: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [saleOpen, setSaleOpen] = useState(false);
+  const [saleKindOpen, setSaleKindOpen] = useState<SaleKind | undefined>();
   const isNew = !client;
 
   useEffect(() => {
@@ -159,7 +160,11 @@ export function ClientModal({ open, onClose, client, initialDraft }: {
               <div className="card p-3"><div className="text-xs text-mute">Total pago</div><div className="mt-1 font-semibold">{fmtBRL(t.gross)}</div></div>
               <div className="card p-3"><div className="text-xs text-mute">Compras</div><div className="mt-1 font-semibold">{t.count}</div></div>
             </div>
-            <div className="flex justify-end"><Button onClick={() => setSaleOpen(true)}>Lançar venda / renovação</Button></div>
+            <div className="flex flex-wrap justify-end gap-2">
+              {client.planId && <Button variant="outline" onClick={() => { setSaleKindOpen('troca'); setSaleOpen(true); }}>Trocar de plano (no meio do ciclo)</Button>}
+              {client.planId && <Button variant="outline" onClick={() => { setSaleKindOpen('renovacao'); setSaleOpen(true); }}>Renovar</Button>}
+              <Button onClick={() => { setSaleKindOpen(client.planId ? undefined : 'nova'); setSaleOpen(true); }}>Lançar venda</Button>
+            </div>
             {mySales.length === 0 ? <p className="text-sm text-mute">Nenhuma venda ainda.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -168,7 +173,9 @@ export function ClientModal({ open, onClose, client, initialDraft }: {
                     {mySales.map((s) => (
                       <tr key={s.id} className="border-b border-line/60">
                         <td className="td">{fmtDate(s.date)}</td>
-                        <td className="td">{s.planName}{s.isRenewal && <span className="ml-1"><Badge tone="gold">renovação</Badge></span>}</td>
+                        <td className="td">{s.planName}{saleKind(s) !== 'nova' && <span className="ml-1"><Badge tone="gold">{saleKind(s) === 'troca' ? 'troca de plano' : 'renovação'}</Badge></span>}
+                          {s.prevPlanName && <div className="text-xs text-mute">antes: {s.prevPlanName}</div>}
+                          {s.parts && s.parts.length > 0 && <div className="text-xs text-mute">{s.paymentMode === 'sinal' ? 'sinal + restante' : 'parcelado'} · {s.parts.filter((p) => p.status === 'pago').length}/{s.parts.length} pagas · falta {fmtBRL2(s.parts.filter((p) => p.status === 'pendente').reduce((a, p) => a + p.amount, 0))}</div>}</td>
                         <td className="td">{PERIOD_LABEL[s.period]}</td>
                         <td className="td text-mute">{fmtDate(s.startDate)} → {fmtDate(s.endDate)}</td>
                         <td className="td">{fmtBRL(s.gross)}</td>
@@ -201,7 +208,7 @@ export function ClientModal({ open, onClose, client, initialDraft }: {
         )}
         {err && <p className="mt-3 text-sm text-bad">{err}</p>}
       </Modal>
-      {client && <SaleForm open={saleOpen} onClose={() => setSaleOpen(false)} client={client} clientSales={mySales} />}
+      {client && <SaleForm open={saleOpen} onClose={() => setSaleOpen(false)} client={client} clientSales={mySales} initialKind={saleKindOpen} />}
     </>
   );
 }

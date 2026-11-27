@@ -9,7 +9,7 @@ import { SetupNeeded } from '@/components/SetupNeeded';
 
 const NAV: { group: string; items: { href: string; label: string; owner?: boolean }[] }[] = [
   { group: 'Visão', items: [{ href: '/painel/', label: 'Painel' }, { href: '/desempenho/', label: 'Desempenho' }] },
-  { group: 'Clientes', items: [{ href: '/clientes/', label: 'Central de clientes' }, { href: '/renovacoes/', label: 'Renovações' }] },
+  { group: 'Clientes', items: [{ href: '/clientes/', label: 'Central de clientes' }, { href: '/renovacoes/', label: 'Renovações' }, { href: '/cobrancas/', label: 'Cobranças' }] },
   { group: 'Comercial', items: [
     { href: '/vendas/', label: 'Vendas' },
     { href: '/metas/', label: 'Metas por canal' },
