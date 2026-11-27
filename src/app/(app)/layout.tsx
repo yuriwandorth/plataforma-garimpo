@@ -9,19 +9,31 @@ import { SetupNeeded } from '@/components/SetupNeeded';
 
 const NAV: { group: string; items: { href: string; label: string; owner?: boolean }[] }[] = [
   { group: 'Visão', items: [{ href: '/painel/', label: 'Painel' }, { href: '/desempenho/', label: 'Desempenho' }] },
-  { group: 'Clientes', items: [{ href: '/clientes/', label: 'Central de clientes' }, { href: '/renovacoes/', label: 'Renovações' }, { href: '/cobrancas/', label: 'Cobranças' }] },
+  { group: 'Clientes', items: [
+    { href: '/clientes/', label: 'Central de clientes' },
+    { href: '/renovacoes/', label: 'Renovações' },
+    { href: '/cobrancas/', label: 'Cobranças' },
+  ] },
   { group: 'Comercial', items: [
     { href: '/vendas/', label: 'Vendas' },
     { href: '/metas/', label: 'Metas por canal' },
+    { href: '/campanhas/', label: 'Campanhas' },
     { href: '/produtos/', label: 'Produtos e planos' },
     { href: '/ofertas/', label: 'Ofertas' },
+    { href: '/influencers/', label: 'Influencers' },
+    { href: '/embaixadoras/', label: 'Embaixadoras' },
+    { href: '/ranking/', label: 'Ranking do negócio' },
   ] },
   { group: 'Gestão', items: [
+    { href: '/okr/', label: 'OKR' },
+    { href: '/atividades/', label: 'Atividades' },
+    { href: '/conhecimento/', label: 'Base de conhecimento' },
+    { href: '/diario/', label: 'Diário', owner: true },
     { href: '/time/', label: 'Time', owner: true },
     { href: '/configuracoes/', label: 'Configurações', owner: true },
   ] },
 ];
-const SOON = ['Influencers', 'Embaixadoras', 'OKR e atividades', 'Base de conhecimento', 'Atendimento às alunas'];
+const SOON = ['Atendimento às alunas', 'Área da aluna', 'Checkout integrado'];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { loading, user, profile, tenant, logout } = useSession();

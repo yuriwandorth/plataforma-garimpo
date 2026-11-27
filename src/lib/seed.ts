@@ -45,11 +45,14 @@ export async function loadSeed(tenantId: string, uid: string) {
     } });
   }));
 
-  // 60 clientes com vendas espalhadas nos últimos 12 meses, algumas renovações
+  // 60 clientes com vendas espalhadas nos últimos 12 meses, algumas renovações e indicações
+  const created: string[] = [];
   for (let i = 0; i < 60; i++) {
     const name = `${pick(FIRST)} ${pick(LAST)} (exemplo)`;
     const cid = id();
     const channel = pick(CHANNELS);
+    const referredById = channel === 'indicacao' && created.length > 3 ? created[Math.floor(r() * Math.min(created.length, 8))] : undefined;
+    created.push(cid);
     let start = addDays(addMonths(today, -12), Math.floor(r() * 360));
     let last: { plan: typeof plans[0]; start: string; end: string } | null = null;
     let first = true;
@@ -60,7 +63,8 @@ export async function loadSeed(tenantId: string, uid: string) {
       ops.push({ path: ['sales', id()], data: {
         clientId: cid, clientName: name, planId: plan.id, planName: plan.name, productId: plan.productId, period: plan.period,
         gross: plan.price, fees: card ? Math.round(plan.price * 0.04) : 0, date: start, startDate: start, endDate: end,
-        channelId: first ? channel : 'renovacao', isRenewal: !first, status: 'aprovada', paymentMethod: card ? 'cartao' : 'pix',
+        channelId: first ? channel : 'renovacao', isRenewal: !first, kind: first ? 'nova' : 'renovacao', status: 'aprovada',
+        referredById: first ? referredById : undefined, paymentMethod: card ? 'cartao' : 'pix',
         installments: card ? 12 : 1, isTest: false, createdAt: Date.now(), createdBy: uid, seed: true,
       } });
       last = { plan, start, end };
@@ -71,7 +75,7 @@ export async function loadSeed(tenantId: string, uid: string) {
     const isActive = last && last.end >= today;
     ops.push({ path: ['clients', cid], data: {
       name, email: `exemplo${i}@exemplo.com`, phone: `81 9${String(80000000 + i)}`, status: isActive ? 'ativo' : 'inativo',
-      channelId: channel, planId: last?.plan.id, planName: last?.plan.name, startDate: last?.start, endDate: last?.end,
+      channelId: channel, referredById, period: last?.plan.period, planId: last?.plan.id, planName: last?.plan.name, startDate: last?.start, endDate: last?.end,
       lastValue: last?.plan.price, isTest: false, createdAt: Date.now(), updatedAt: Date.now(), seed: true,
     } });
   }

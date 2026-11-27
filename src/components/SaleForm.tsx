@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { addDays, buildParts, planEndDate, todayISO, parseMoney, fmtBRL2 } from '@/lib/calc';
 import { useWriter } from '@/lib/db';
-import { useChannels, useClients, useMembers, usePlans, useProducts } from '@/lib/hooks';
+import { useChannels, useClients, useInfluencers, useMembers, usePlans, useProducts } from '@/lib/hooks';
 import type { Client, Part, PaymentMethod, PaymentMode, Sale, SaleKind, SaleStatus } from '@/lib/types';
 import { PERIOD_LABEL } from '@/lib/types';
 import { useSession } from '@/lib/auth';
@@ -29,6 +29,7 @@ export function SaleForm({ open, onClose, client, sale, clientSales, initialKind
   const plans = usePlans();
   const channels = useChannels();
   const members = useMembers();
+  const influencers = useInfluencers();
 
   const [clientId, setClientId] = useState('');
   const [clientSearch, setClientSearch] = useState('');
@@ -41,6 +42,7 @@ export function SaleForm({ open, onClose, client, sale, clientSales, initialKind
   const [channelId, setChannelId] = useState('');
   const [sellerId, setSellerId] = useState('');
   const [referredById, setReferredById] = useState('');
+  const [influencerId, setInfluencerId] = useState('');
   const [kind, setKind] = useState<SaleKind>('nova');
   const isRenewal = kind === 'renovacao';
   const setIsRenewal = (v: boolean) => setKind(v ? 'renovacao' : 'nova');
@@ -62,14 +64,14 @@ export function SaleForm({ open, onClose, client, sale, clientSales, initialKind
     if (sale) {
       setClientId(sale.clientId); setPlanId(sale.planId); setGross(String(sale.gross).replace('.', ','));
       setFees(String(sale.fees ?? 0).replace('.', ',')); setDate(sale.date); setStartDate(sale.startDate); setEndDate(sale.endDate);
-      setChannelId(sale.channelId ?? ''); setSellerId(sale.sellerId ?? ''); setReferredById(sale.referredById ?? '');
+      setChannelId(sale.channelId ?? ''); setSellerId(sale.sellerId ?? ''); setReferredById(sale.referredById ?? ''); setInfluencerId(sale.influencerId ?? '');
       setKind(sale.kind ?? (sale.isRenewal ? 'renovacao' : 'nova')); setStatus(sale.status); setPaymentMethod(sale.paymentMethod);
       setMode(sale.paymentMode ?? 'avista'); setParts(sale.parts ?? []); setPartsCount(Math.max(2, sale.parts?.length ?? 2));
       setInstallments(sale.installments || 1); setNotes(sale.notes ?? '');
     } else {
       const t = todayISO();
       setClientId(client?.id ?? ''); setPlanId(''); setGross(''); setFees('0'); setDate(t); setStartDate(t); setEndDate('');
-      setChannelId(client?.channelId ?? ''); setSellerId(client?.sellerId ?? ''); setReferredById(client?.referredById ?? '');
+      setChannelId(client?.channelId ?? ''); setSellerId(client?.sellerId ?? ''); setReferredById(client?.referredById ?? ''); setInfluencerId(client?.influencerId ?? '');
       const hasPrev = (clientSales ?? []).some((s) => s.status === 'aprovada') || !!client?.planId;
       const k: SaleKind = initialKind ?? (hasPrev ? 'renovacao' : 'nova');
       setKind(k); setStatus('aprovada'); setPaymentMethod('pix'); setInstallments(1); setNotes('');
@@ -123,6 +125,7 @@ export function SaleForm({ open, onClose, client, sale, clientSales, initialKind
         clientId: selectedClient.id, clientName: selectedClient.name, planId: plan.id, planName: plan.name,
         productId: plan.productId, period: plan.period, gross: value, fees: parseMoney(fees), date, startDate, endDate,
         channelId: channelId || undefined, sellerId: sellerId || undefined, referredById: referredById || undefined,
+        influencerId: influencerId || undefined,
         isRenewal, kind, prevPlanName: kind !== 'nova' ? selectedClient.planName : undefined,
         paymentMode: mode, parts: mode === 'avista' ? [] : parts.map((p) => (p.status === 'pago' ? { ...p, paidAt: p.paidAt || p.due } : { due: p.due, amount: p.amount, status: p.status })),
         status, paymentMethod, installments, isTest: !!selectedClient.isTest, notes: notes || undefined,
@@ -138,6 +141,7 @@ export function SaleForm({ open, onClose, client, sale, clientSales, initialKind
           status: 'ativo', channelId: selectedClient.channelId || channelId || undefined,
           sellerId: selectedClient.sellerId || sellerId || undefined,
           referredById: selectedClient.referredById || referredById || undefined,
+          influencerId: selectedClient.influencerId || influencerId || undefined,
         }, `Plano atualizado pela venda: ${plan.name}`);
       }
       onClose();
@@ -221,6 +225,12 @@ export function SaleForm({ open, onClose, client, sale, clientSales, initialKind
           <select className="input" value={referredById} onChange={(e) => setReferredById(e.target.value)}>
             <option value="">Ninguém</option>
             {clients.data.filter((c) => !c.deleted && c.id !== selectedClient?.id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Influencer" hint="A venda entra no faturamento e na comissão dela.">
+          <select className="input" value={influencerId} onChange={(e) => { setInfluencerId(e.target.value); if (e.target.value && !channelId) setChannelId('influencer'); }}>
+            <option value="">Nenhuma</option>
+            {influencers.closed.map((i) => <option key={i.id} value={i.id}>{i.name} (@{i.handle})</option>)}
           </select>
         </Field>
         <div className="grid grid-cols-2 gap-3">

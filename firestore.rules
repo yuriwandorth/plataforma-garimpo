@@ -63,6 +63,10 @@ service cloud.firestore {
       }
 
       // Configurações comerciais: só o dono altera
+      // Diário: só o(a) dono(a)
+      match /journal/{id} {
+        allow read, write: if owner(t);
+      }
       match /channels/{id} {
         allow read: if active(t);
         // tenantOwnerUid usa getAfter: permite criar os canais padrão no mesmo lote que abre a consultoria
@@ -71,10 +75,10 @@ service cloud.firestore {
 
       // Dados do dia a dia: todo membro ativo
       match /{col}/{id} {
-        allow read: if active(t) && col in ['clients', 'products', 'plans', 'sales', 'goals', 'offers'];
-        allow create, update: if active(t) && col in ['clients', 'products', 'plans', 'sales', 'goals', 'offers'];
+        allow read: if active(t) && col in ['clients', 'products', 'plans', 'sales', 'goals', 'offers', 'influencers', 'commissionModels', 'influencerMonths', 'ambassadors', 'okrs', 'activities', 'campaigns', 'knowledge', 'assessments'];
+        allow create, update: if active(t) && col in ['clients', 'products', 'plans', 'sales', 'goals', 'offers', 'influencers', 'commissionModels', 'influencerMonths', 'ambassadors', 'okrs', 'activities', 'campaigns', 'knowledge', 'assessments'];
         // exclusão definitiva só do dono (clientes usam exclusão lógica)
-        allow delete: if owner(t) && col in ['products', 'plans', 'sales', 'goals', 'clients', 'offers'];
+        allow delete: if owner(t) && col in ['products', 'plans', 'sales', 'goals', 'clients', 'offers', 'influencers', 'commissionModels', 'influencerMonths', 'ambassadors', 'okrs', 'activities', 'campaigns', 'knowledge', 'assessments'];
       }
     }
   }

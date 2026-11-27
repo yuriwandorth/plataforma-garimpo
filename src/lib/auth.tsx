@@ -79,7 +79,6 @@ export async function createTenant(user: User, name: string, ownerName: string) 
   batch.set(tenantRef, {
     name, ownerUid: user.uid, createdAt: Date.now(),
     milestones: [50000, 100000, 500000, 1000000],
-    milestonesStart: new Date().toISOString().slice(0, 10),
   });
   batch.set(doc(db, 'tenants', tid, 'members', user.uid), {
     name: ownerName, email: user.email ?? '', role: 'owner', cargo: 'Dono(a)', isSeller: true, active: true,

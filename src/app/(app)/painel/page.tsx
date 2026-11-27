@@ -10,6 +10,8 @@ import {
   parts, prevMonth, renewalsDue, salesBetween, todayISO, totals, weekIndex, weekRanges,
 } from '@/lib/calc';
 import type { ChannelGoal } from '@/lib/types';
+import { okrProgress, KR_LABEL, type Activity, type Okr } from '@/lib/manage';
+import { useWriter } from '@/lib/db';
 import { Badge, Card, Progress, Spinner, Stat } from '@/components/ui';
 
 export default function PainelPage() {
@@ -17,12 +19,16 @@ export default function PainelPage() {
   const today = todayISO();
   const t = parts(today);
   const pm = prevMonth(t.y, t.m);
-  const milestonesStart = tenant?.milestonesStart ?? iso(t.y, 1, 1);
+  // sem data inicial definida, as conquistas contam todo o histórico
+  const milestonesStart = tenant?.milestonesStart || '2000-01-01';
   const since = milestonesStart < iso(pm.y, pm.m, 1) ? milestonesStart : iso(pm.y, pm.m, 1);
   const sales = useSalesSince(since);
   const goals = useCollection<ChannelGoal>('goals', [where('year', '==', t.y), where('month', '==', t.m)], `${t.y}-${t.m}`);
   const clients = useClients();
   const channels = useChannels();
+  const okrs = useCollection<Okr>('okrs');
+  const acts = useCollection<Activity>('activities');
+  const w = useWriter();
 
   const wi = weekIndex(today);
   const weeks = weekRanges(t.y, t.m);
@@ -49,6 +55,8 @@ export default function PainelPage() {
   const hour = Number(new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Recife', hour: 'numeric' }).format(new Date()));
   const hello = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
 
+  const okr = [...okrs.data].sort((a, b) => b.createdAt - a.createdAt).find((o) => o.status === 'ativo');
+  const pending = acts.data.filter((a) => !a.done).sort((a, b) => ((a.due ?? '9999') < (b.due ?? '9999') ? -1 : 1));
   if (sales.loading) return <Spinner />;
 
   return (
@@ -58,6 +66,36 @@ export default function PainelPage() {
         <p className="mt-1 text-sm text-mute">
           {MONTHS[t.m - 1]} · semana {wi + 1} ({fmtDate(week.start).slice(0, 5)} a {fmtDate(week.end).slice(0, 5)}) · faturamento do mês {fmtBRL(month.gross)}
         </p>
+      </div>
+
+      <div className="mb-6 grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2" title="Seu OKR atual" action={<Link href="/okr/" className="text-xs text-gold hover:underline">{okr ? 'Abrir' : 'Criar OKR'}</Link>}>
+          {okr ? (
+            <>
+              <p className="font-medium">{okr.objective}</p>
+              <div className="my-2"><Progress value={okrProgress(okr)} /></div>
+              <ul className="space-y-1 text-sm">
+                {okr.krs.map((k, i) => (
+                  <li key={i} className="flex items-start justify-between gap-3"><span><b className="mr-1 text-mute">KR{i + 1}</b>{k.text}</span>
+                    <Badge tone={k.status === 'concluido' ? 'good' : k.status === 'em-andamento' ? 'gold' : 'mute'}>{k.status === 'em-andamento' ? `${k.progress}%` : KR_LABEL[k.status]}</Badge></li>
+                ))}
+              </ul>
+            </>
+          ) : <p className="text-sm text-mute">Nenhum OKR ativo. Defina o objetivo dos próximos 90 dias.</p>}
+        </Card>
+        <Card title={`Atividades a fazer · ${pending.length}`} action={<Link href="/atividades/" className="text-xs text-gold hover:underline">Ver todas</Link>}>
+          {pending.length === 0 ? <p className="text-sm text-mute">Nada pendente.</p> : (
+            <ul className="space-y-2">
+              {pending.slice(0, 5).map((a) => (
+                <li key={a.id} className="flex items-start gap-2 text-sm">
+                  <input type="checkbox" className="mt-1 h-4 w-4 accent-[rgb(var(--gold))]" aria-label="Marcar como concluída"
+                    onChange={() => w.update<Activity>('activities', a.id, { done: true, doneAt: today }, `Concluída: ${a.title}`)} />
+                  <span>{a.title}{a.due && <span className={a.due < today ? 'block text-xs text-bad' : 'block text-xs text-mute'}>até {fmtDate(a.due)}</span>}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
       </div>
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -99,7 +137,7 @@ export default function PainelPage() {
               <>
                 <div className="text-sm"><b>{fmtBRL(ms.total)}</b> <span className="text-mute">de {fmtBRL(ms.next)}</span></div>
                 <div className="my-2"><Progress value={ms.pctToNext} /></div>
-                <div className="text-xs text-mute">Faltam {fmtBRL(ms.missing)} · contando desde {fmtDate(milestonesStart)}</div>
+                <div className="text-xs text-mute">Faltam {fmtBRL(ms.missing)} · {milestonesStart === '2000-01-01' ? 'todo o histórico' : `contando desde ${fmtDate(milestonesStart)}`}</div>
               </>
             ) : <div className="text-sm">Todos os marcos batidos: {fmtBRL(ms.total)}.</div>}
             {ms.reached.length > 0 && <div className="mt-2 text-xs text-good">Conquistado: {ms.reached.map(fmtBRL).join(' · ')}</div>}

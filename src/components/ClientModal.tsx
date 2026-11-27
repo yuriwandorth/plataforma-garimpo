@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { where } from 'firebase/firestore';
 import { useCollection, useWriter } from '@/lib/db';
-import { useChannels, useClients, useMembers } from '@/lib/hooks';
+import { useChannels, useClients, useInfluencers, useMembers } from '@/lib/hooks';
 import { fmtBRL, fmtBRL2, fmtDate, totals, todayISO, daysBetween, saleKind } from '@/lib/calc';
 import type { Client, ClientStatus, Sale, SaleKind } from '@/lib/types';
 import { PERIOD_LABEL } from '@/lib/types';
@@ -29,6 +29,7 @@ export function ClientModal({ open, onClose, client, initialDraft }: {
   const clients = useClients();
   const channels = useChannels();
   const members = useMembers();
+  const influencers = useInfluencers();
   const [tab, setTab] = useState<Tab>('cadastro');
   const [f, setF] = useState<Partial<Client>>({});
   const [busy, setBusy] = useState(false);
@@ -66,6 +67,7 @@ export function ClientModal({ open, onClose, client, initialDraft }: {
         name, email, cpf: f.cpf?.trim() || undefined, phone: f.phone?.trim() || undefined,
         status: f.status ?? 'rascunho', isTest: !!f.isTest, sendAppAccess: !!f.sendAppAccess, notes: f.notes?.trim() || undefined,
         channelId: f.channelId || undefined, sellerId: f.sellerId || undefined, referredById: f.referredById || undefined,
+        influencerId: f.influencerId || undefined,
       };
       if (isNew) await w.create('clients', data, `Cliente criado: ${name}`);
       else await w.update<Client>('clients', client!.id, data, `Cadastro editado: ${name}`);
@@ -140,7 +142,13 @@ export function ClientModal({ open, onClose, client, initialDraft }: {
                 {members.sellers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             </Field>
-            <Field label="Indicado por" className="sm:col-span-2">
+            <Field label="Influencer">
+              <select className="input" value={f.influencerId ?? ''} onChange={(e) => set('influencerId', e.target.value)}>
+                <option value="">Nenhuma</option>
+                {influencers.data.filter((i) => i.stage === 'fechado' || i.id === f.influencerId).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Indicado por">
               <select className="input" value={f.referredById ?? ''} onChange={(e) => set('referredById', e.target.value)}>
                 <option value="">Ninguém</option>
                 {clients.data.filter((c) => !c.deleted && c.id !== client?.id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}

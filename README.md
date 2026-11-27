@@ -4,17 +4,21 @@ Gestão interna da consultoria: clientes, renovações, produtos e planos, venda
 
 ## O que já funciona
 
-| Tela | O que faz |
-| --- | --- |
-| Painel | Meta da semana, clientes ativos, renovações em 30 dias, progresso por canal, próxima conquista, últimas vendas |
-| Desempenho | Faturamento líquido, vendas, ticket médio, clientes ativos e novos (comparando com o mês anterior), gráfico de 12 meses, por canal, por vendedor, taxa de renovação, mix de planos |
-| Central de clientes | Lista com filtros por situação, canal, vendedor e plano; ficha com cadastro, plano e vendas, indicações; cliente de teste; excluir e restaurar; exportar CSV |
-| Renovações | Quem vence em 15/30/60/90 dias, botão de WhatsApp com mensagem pronta, marcar contato |
-| Vendas | Lançar, editar e estornar vendas; totais do mês; exportar CSV |
-| Metas por canal | Meta mensal em 4 semanas por canal, realizado automático pelas vendas, ajuste manual, status em dia/atrasado |
-| Produtos e planos | Produtos (o que inclui), planos com período, preço, pagamento, parcelas; duplicar e arquivar |
-| Time | Convidar pessoas por e-mail, cargo, vendedor, desligar acesso |
-| Configurações | Nome, canais de venda, marcos de faturamento, dados de exemplo |
+| Área | Tela | O que faz |
+| --- | --- | --- |
+| Visão | Painel | OKR atual, atividades pendentes, meta da semana, clientes ativas, renovações, progresso por canal, próxima conquista, últimas vendas |
+| Visão | Desempenho | Faturamento líquido, vendas, ticket, ativas e novas vs mês anterior; 12 meses; por semana e por canal com maior queda; hunter × farmer; MRR; renovações; taxa de ascensão; planos e vendedores |
+| Clientes | Central de clientes | Filtros, ficha (cadastro, plano e vendas, indicações), renovar, trocar de plano, cliente de teste, excluir/restaurar, CSV |
+| Clientes | Renovações | Por mês de referência: a renovar, realizadas, receita estimada, vencidas, taxa; WhatsApp e "Marcar renovado" |
+| Clientes | Cobranças | Sinal + restante e parcelado: a receber, recebidas, inadimplência, saldo em aberto; "Marcar recebido" |
+| Comercial | Vendas | Nova venda, renovação ou troca de plano; forma de recebimento; influencer e indicação; CSV |
+| Comercial | Metas por canal | Meta mensal em 4 semanas por canal, realizado automático + ajuste manual |
+| Comercial | Campanhas | Data, oferta, preços, meta e plano de ação por canal com táticas; realizado do período; resultado |
+| Comercial | Produtos, planos e Ofertas | Planos e o construtor de oferta em 5 passos com texto para WhatsApp |
+| Comercial | Influencers | Funil, modelos de comissão por faixa, permuta com teste de 3 meses e checklist, painel mensal com comissão automática |
+| Comercial | Embaixadoras | Ranking mês/tudo por volume ou receita, negociação (mais meses, comissão, desconto), radar e mapa de oportunidades |
+| Comercial | Ranking do negócio | Autoavaliação 1–4 em 5 áreas e 25 pilares, nível e histórico |
+| Gestão | OKR, Atividades, Base de conhecimento, Diário, Time, Configurações | Objetivo e KRs com progresso; tarefas; manual por setor com insumos; diário privado; convites; canais hunter/farmer |
 
 Regras dos números: só vendas **aprovadas** de clientes que **não são de teste** entram nos indicadores. Semanas do mês: S1 dias 1–7, S2 8–14, S3 15–21, S4 22 até o fim. Fuso de Recife.
 

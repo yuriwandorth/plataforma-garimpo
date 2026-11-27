@@ -46,3 +46,10 @@ export function download(filename: string, content: string, mime = 'text/csv;cha
   a.click();
   URL.revokeObjectURL(a.href);
 }
+
+export function useInfluencers() {
+  const r = useCollection<import('./growth').Influencer>('influencers');
+  const data = useMemo(() => [...r.data].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')), [r.data]);
+  const byId = useMemo(() => Object.fromEntries(data.map((i) => [i.id, i])), [data]);
+  return { ...r, data, closed: data.filter((i) => i.stage === 'fechado' && i.active !== false), byId };
+}

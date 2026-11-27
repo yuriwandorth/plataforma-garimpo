@@ -144,3 +144,10 @@ describe('marcos e séries', () => {
     expect(parseMoney('2097')).toBe(2097);
   });
 });
+
+import { deepClean } from '@/lib/calc';
+describe('limpeza para o Firestore', () => {
+  it('remove undefined em qualquer nível', () => {
+    expect(deepClean({ a: 1, b: undefined, c: [{ d: undefined, e: 2 }], f: { g: undefined } })).toEqual({ a: 1, c: [{ e: 2 }], f: {} });
+  });
+});

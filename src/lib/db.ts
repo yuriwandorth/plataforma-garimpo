@@ -8,16 +8,19 @@ import {
 import { db } from './firebase';
 import { useSession } from './auth';
 import type { AuditEntry } from './types';
+import { deepClean } from './calc';
+export { deepClean };
 
 export type Col =
-  | 'clients' | 'products' | 'plans' | 'sales' | 'channels' | 'goals' | 'members' | 'audit' | 'offers';
+  | 'clients' | 'products' | 'plans' | 'sales' | 'channels' | 'goals' | 'members' | 'audit' | 'offers'
+  | 'influencers' | 'commissionModels' | 'influencerMonths' | 'ambassadors'
+  | 'okrs' | 'activities' | 'journal' | 'campaigns' | 'knowledge' | 'assessments';
 
 export const colRef = (tenantId: string, c: Col) => collection(db, 'tenants', tenantId, c);
 export const docRef = (tenantId: string, c: Col, id: string) => doc(db, 'tenants', tenantId, c, id);
 
-/** Remove campos undefined (o Firestore recusa undefined) */
 export function clean<T extends object>(o: T): T {
-  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
+  return deepClean(o);
 }
 
 /** Assina uma coleção em tempo real. `constraints` filtram no servidor. */
@@ -70,7 +73,7 @@ export function useWriter() {
     async update<T extends object>(c: Col, id: string, data: Partial<T>, summary: string) {
       // campo apagado no formulário (undefined) = remove o campo no banco
       const payload = Object.fromEntries(
-        Object.entries({ ...data, updatedAt: Date.now() }).map(([k, v]) => [k, v === undefined ? deleteField() : v]),
+        Object.entries({ ...data, updatedAt: Date.now() }).map(([k, v]) => [k, v === undefined ? deleteField() : deepClean(v)]),
       );
       await updateDoc(docRef(tid, c, id), payload as never);
       await log(c, id, 'update', summary);

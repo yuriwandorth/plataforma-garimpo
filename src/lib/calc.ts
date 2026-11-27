@@ -488,3 +488,12 @@ export function groupRevenue(sales: Sale[], key: (s: Sale) => string) {
   ok.forEach((s) => { const k = key(s); const v = g.get(k) ?? { value: 0, count: 0 }; v.value += net(s); v.count++; g.set(k, v); });
   return [...g.entries()].map(([k, v]) => ({ key: k, ...v, share: total ? v.value / total : 0 })).sort((a, b) => b.value - a.value);
 }
+
+/** Remove campos undefined em qualquer nível (o Firestore recusa undefined, inclusive dentro de listas) */
+export function deepClean<T>(v: T): T {
+  if (Array.isArray(v)) return v.map((x) => deepClean(x)) as T;
+  if (v && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype) {
+    return Object.fromEntries(Object.entries(v as object).filter(([, x]) => x !== undefined).map(([k, x]) => [k, deepClean(x)])) as T;
+  }
+  return v;
+}
