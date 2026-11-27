@@ -14,6 +14,7 @@ const NAV: { group: string; items: { href: string; label: string; owner?: boolea
     { href: '/vendas/', label: 'Vendas' },
     { href: '/metas/', label: 'Metas por canal' },
     { href: '/produtos/', label: 'Produtos e planos' },
+    { href: '/ofertas/', label: 'Ofertas' },
   ] },
   { group: 'Gestão', items: [
     { href: '/time/', label: 'Time', owner: true },

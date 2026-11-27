@@ -10,7 +10,7 @@ import { useSession } from './auth';
 import type { AuditEntry } from './types';
 
 export type Col =
-  | 'clients' | 'products' | 'plans' | 'sales' | 'channels' | 'goals' | 'members' | 'audit';
+  | 'clients' | 'products' | 'plans' | 'sales' | 'channels' | 'goals' | 'members' | 'audit' | 'offers';
 
 export const colRef = (tenantId: string, c: Col) => collection(db, 'tenants', tenantId, c);
 export const docRef = (tenantId: string, c: Col, id: string) => doc(db, 'tenants', tenantId, c, id);
