@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 247 246 243;
+  --panel: 255 255 255;
+  --line: 229 226 219;
+  --ink: 28 27 24;
+  --mute: 112 108 99;
+  --gold: 176 132 32;
+  --good: 22 128 82;
+  --warn: 196 120 14;
+  --bad: 196 48 48;
+}
+.dark {
+  --bg: 18 17 15;
+  --panel: 28 27 24;
+  --line: 52 49 44;
+  --ink: 241 238 231;
+  --mute: 160 154 143;
+  --gold: 222 176 72;
+  --good: 74 190 132;
+  --warn: 236 170 70;
+  --bad: 236 98 98;
+}
+
+html, body { background: rgb(var(--bg)); color: rgb(var(--ink)); }
+body { font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+
+@layer components {
+  .input {
+    @apply w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm text-ink outline-none placeholder:text-mute/70 focus:border-gold focus:ring-2 focus:ring-gold/20 disabled:opacity-60;
+  }
+  .label { @apply mb-1 block text-xs font-medium text-mute; }
+  .card { @apply rounded-xl border border-line bg-panel; }
+  .th { @apply px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-mute; }
+  .td { @apply px-3 py-2.5 text-sm; }
+}

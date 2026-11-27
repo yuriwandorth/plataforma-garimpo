@@ -1,0 +1,80 @@
+rules_version = '2';
+// Regras de segurança da Plataforma Garimpo.
+// Cada consultoria (tenant) só enxerga os próprios dados.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function email() { return request.auth.token.email.lower(); }
+    function member(t) { return signedIn() && exists(/databases/$(database)/documents/tenants/$(t)/members/$(request.auth.uid)); }
+    function memberDoc(t) { return get(/databases/$(database)/documents/tenants/$(t)/members/$(request.auth.uid)).data; }
+    function active(t) { return member(t) && memberDoc(t).active == true; }
+    function owner(t) { return active(t) && memberDoc(t).role == 'owner'; }
+    // getAfter: enxerga o lote que cria consultoria + membro + perfil de uma vez
+    function tenantOwnerUid(t) { return getAfter(/databases/$(database)/documents/tenants/$(t)).data.ownerUid; }
+    function invited(t) {
+      return signedIn() && request.auth.token.email != null
+        && exists(/databases/$(database)/documents/invites/$(email()))
+        && get(/databases/$(database)/documents/invites/$(email())).data.tenantId == t;
+    }
+
+    // Perfil do usuário: aponta para a consultoria dele
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid
+        && (
+          // dono criando a própria consultoria
+          (request.resource.data.role == 'owner' && tenantOwnerUid(request.resource.data.tenantId) == uid)
+          // membro aceitando convite
+          || (request.resource.data.role == 'staff' && invited(request.resource.data.tenantId))
+        );
+      allow update, delete: if false;
+    }
+
+    // Convites do time (id = e-mail em minúsculas)
+    match /invites/{inviteEmail} {
+      allow read: if signedIn() && (email() == inviteEmail || owner(resource.data.tenantId));
+      allow create, update: if owner(request.resource.data.tenantId);
+      allow delete: if owner(resource.data.tenantId) || (signedIn() && email() == inviteEmail);
+    }
+
+    match /tenants/{t} {
+      allow read: if active(t);
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if owner(t) && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow read: if active(t);
+        // o dono cria o próprio registro ao abrir a consultoria; convidado entra pelo convite
+        allow create: if signedIn() && request.auth.uid == uid && (
+          (tenantOwnerUid(t) == uid && request.resource.data.role == 'owner')
+          || (invited(t) && request.resource.data.role == 'staff')
+        );
+        allow update: if owner(t);
+        allow delete: if false; // desligar = active false
+      }
+
+      // Auditoria: só acrescenta, ninguém altera
+      match /audit/{id} {
+        allow read: if owner(t);
+        allow create: if active(t) && request.resource.data.by == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      // Configurações comerciais: só o dono altera
+      match /channels/{id} {
+        allow read: if active(t);
+        allow write: if owner(t);
+      }
+
+      // Dados do dia a dia: todo membro ativo
+      match /{col}/{id} {
+        allow read: if active(t) && col in ['clients', 'products', 'plans', 'sales', 'goals'];
+        allow create, update: if active(t) && col in ['clients', 'products', 'plans', 'sales', 'goals'];
+        // exclusão definitiva só do dono (clientes usam exclusão lógica)
+        allow delete: if owner(t) && col in ['products', 'plans', 'sales', 'goals', 'clients'];
+      }
+    }
+  }
+}
