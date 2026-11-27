@@ -3,6 +3,7 @@
 import type { Client, ClientStatus, PaymentMethod, Period, Plan, Sale, SaleKind } from './types';
 import type { Influencer } from './growth';
 import { planEndDate } from './calc';
+import { matchClient, phoneKey, type Lead, type LeadStage } from './leads';
 
 export interface ImpInfluencer { key: string; name: string; handle: string; email?: string; network?: string; closedAt?: string; coupon?: string }
 export interface ImpClient { key: string; name: string; email?: string; phone?: string; cpf?: string; status?: ClientStatus; notes?: string; channelId?: string; referredByKey?: string; isTest?: boolean }
@@ -23,7 +24,8 @@ export interface ImpSale {
   channelId?: string;
   notes?: string;
 }
-export interface ImportPayload { source: string; influencers?: ImpInfluencer[]; clients?: ImpClient[]; sales?: ImpSale[] }
+export interface ImpLead { key: string; name: string; phone?: string; email?: string; list?: string; originStage?: string; stage?: LeadStage; tags?: string[]; firstSeenAt?: string; lastContactAt?: string; notes?: string; channelId?: string }
+export interface ImportPayload { source: string; influencers?: ImpInfluencer[]; clients?: ImpClient[]; sales?: ImpSale[]; leads?: ImpLead[] }
 
 type WithId<T> = T & { id: string };
 export interface Existing {
@@ -31,6 +33,7 @@ export interface Existing {
   plans: Pick<Plan, 'id' | 'name' | 'period' | 'productId'>[];
   influencers: Pick<Influencer, 'id' | 'name' | 'handle' | 'email'>[];
   sales: (Pick<Sale, 'id' | 'clientId' | 'date' | 'gross'> & { importKey?: string })[];
+  leads?: Pick<Lead, 'id' | 'name' | 'phone' | 'email' | 'list' | 'tags' | 'deleted' | 'stage'>[];
 }
 
 export interface ImportPlan {
@@ -40,7 +43,10 @@ export interface ImportPlan {
   sales: WithId<Omit<Sale, 'id' | 'createdAt'> & { importKey: string }>[];
   /** Plano vigente recalculado para cada cliente que recebeu vendas */
   clientUpdates: { id: string; data: Partial<Client> }[];
-  skipped: { influencers: number; clients: number; sales: number };
+  leads: WithId<Omit<Lead, 'id' | 'createdAt' | 'updatedAt'>>[];
+  /** Leads que já existiam e ganharam lista/etiqueta nova */
+  leadUpdates: { id: string; data: Partial<Lead> }[];
+  skipped: { influencers: number; clients: number; sales: number; leads: number };
   warnings: string[];
 }
 
@@ -58,7 +64,7 @@ export function periodFromName(name: string): Period | null {
 }
 
 export function planImport(p: ImportPayload, ex: Existing, opts: { productId: string; today: string; by: string; newId: () => string }): ImportPlan {
-  const out: ImportPlan = { influencers: [], plans: [], clients: [], sales: [], clientUpdates: [], skipped: { influencers: 0, clients: 0, sales: 0 }, warnings: [] };
+  const out: ImportPlan = { influencers: [], plans: [], clients: [], sales: [], clientUpdates: [], leads: [], leadUpdates: [], skipped: { influencers: 0, clients: 0, sales: 0, leads: 0 }, warnings: [] };
   const src = p.source;
 
   // Influencers: casa por @ ou e-mail
@@ -151,6 +157,40 @@ export function planImport(p: ImportPayload, ex: Existing, opts: { productId: st
         ...(imported?.status ? {} : { status: s.endDate >= opts.today ? 'ativo' : 'inativo' }),
         ...(s.influencerId ? { influencerId: s.influencerId } : {}),
       },
+    });
+  }
+  // Leads: um por telefone (ou e-mail); se já existe, só soma lista/etiquetas; se já é aluna, entra como convertido
+  const exLeads = (ex.leads ?? []).filter((l) => !l.deleted);
+  const seen = new Map<string, number>();
+  const allClients = [...live, ...out.clients.map((c) => ({ id: c.id, name: c.name, phone: c.phone, email: c.email, deleted: false }))];
+  for (const l of p.leads ?? []) {
+    const pk = phoneKey(l.phone);
+    const em = (l.email ?? '').trim().toLowerCase();
+    if (!pk && !em) { out.warnings.push(`Lead ${l.name || l.key}: sem telefone nem e-mail`); continue; }
+    const k = pk || `e:${em}`;
+    const dupIdx = seen.get(k);
+    if (dupIdx !== undefined) {
+      const d = out.leads[dupIdx];
+      d.tags = [...new Set([...(d.tags ?? []), ...(l.tags ?? []), ...(l.list && l.list !== d.list ? [l.list] : [])])];
+      if (l.firstSeenAt && (!d.firstSeenAt || l.firstSeenAt < d.firstSeenAt)) d.firstSeenAt = l.firstSeenAt;
+      continue;
+    }
+    const exist = exLeads.find((e) => (pk && phoneKey(e.phone) === pk) || (em && (e.email ?? '').toLowerCase() === em));
+    if (exist) {
+      out.skipped.leads++;
+      const tags = [...new Set([...(exist.tags ?? []), ...(l.tags ?? []), ...(l.list && l.list !== exist.list ? [l.list] : [])])];
+      if (tags.length !== (exist.tags ?? []).length) out.leadUpdates.push({ id: exist.id, data: { tags } });
+      continue;
+    }
+    const client = matchClient({ phone: l.phone, email: em }, allClients);
+    const id = opts.newId();
+    seen.set(k, out.leads.length);
+    out.leads.push({
+      id, importKey: `${src}:${l.key}`, name: (l.name || l.phone || em).trim(), phone: l.phone?.replace(/\D/g, '') || undefined, email: em || undefined,
+      source: src.split(':')[0], list: l.list || undefined, originStage: l.originStage || undefined,
+      stage: client ? 'convertido' : (l.stage ?? 'novo'), tags: l.tags?.length ? l.tags : undefined,
+      firstSeenAt: l.firstSeenAt || undefined, lastContactAt: l.lastContactAt || undefined, notes: l.notes || undefined, channelId: l.channelId || undefined,
+      clientId: client?.id,
     });
   }
   return out;

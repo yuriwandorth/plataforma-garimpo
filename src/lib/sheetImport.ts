@@ -1,10 +1,10 @@
 // Importação por planilha (.xlsx ou .csv): casa as colunas com os campos da plataforma
 // e transforma as linhas no pacote de importação (importer.ts). Funções puras, testadas em tests/sheetImport.test.ts.
-import type { ImpClient, ImpInfluencer, ImpSale, ImportPayload } from './importer';
+import type { ImpClient, ImpInfluencer, ImpLead, ImpSale, ImportPayload } from './importer';
 import type { ClientStatus, PaymentMethod, SaleKind } from './types';
 import { parseMoney } from './calc';
 
-export type SheetKind = 'clientes' | 'influencers';
+export type SheetKind = 'clientes' | 'influencers' | 'leads';
 export type Cell = string | number | boolean | Date | null | undefined;
 
 export interface FieldDef { id: string; label: string; required?: boolean; hint?: string; synonyms: string[] }
@@ -32,6 +32,16 @@ export const FIELDS: Record<SheetKind, FieldDef[]> = {
     { id: 'email', label: 'E-mail', synonyms: ['email', 'e-mail', 'mail'] },
     { id: 'coupon', label: 'Cupom', synonyms: ['cupom', 'cupom de desconto', 'codigo', 'código'] },
     { id: 'network', label: 'Rede', synonyms: ['rede', 'rede social', 'plataforma'] },
+  ],
+  leads: [
+    { id: 'name', label: 'Nome', synonyms: ['nome', 'contato', 'nome do contato', 'cliente', 'lead', 'name'] },
+    { id: 'phone', label: 'Telefone / WhatsApp', required: true, synonyms: ['telefone', 'whatsapp', 'numero', 'número', 'celular', 'phone', 'fone'] },
+    { id: 'email', label: 'E-mail', synonyms: ['email', 'e-mail', 'mail'] },
+    { id: 'list', label: 'Lista / funil', synonyms: ['lista', 'funil', 'coluna', 'quadro', 'pipeline', 'kanban'] },
+    { id: 'stage', label: 'Etapa', synonyms: ['etapa', 'status', 'estagio', 'estágio', 'fase'] },
+    { id: 'tags', label: 'Etiquetas', hint: 'separadas por vírgula', synonyms: ['etiquetas', 'etiqueta', 'tags', 'tag', 'labels'] },
+    { id: 'date', label: 'Data de entrada', synonyms: ['data', 'data de entrada', 'criado em', 'entrada', 'data de criacao', 'data de criação', 'created'] },
+    { id: 'notes', label: 'Observação', synonyms: ['observacao', 'observação', 'obs', 'notas', 'anotacao', 'anotação'] },
   ],
 };
 
@@ -145,6 +155,19 @@ export function sheetToPayload(rows: Cell[][], headerIdx: number, map: Record<st
       influencers.push({ key: handle.toLowerCase(), name, handle, email: str(r, 'email') || undefined, coupon: str(r, 'coupon') || undefined, network: str(r, 'network') || 'Instagram' });
     });
     return { payload: { source, influencers }, rowErrors: errors, rows: influencers.length };
+  }
+
+  if (kind === 'leads') {
+    const leads: ImpLead[] = [];
+    data.forEach((r, i) => {
+      const phone = str(r, 'phone').replace(/\D/g, '');
+      const email = str(r, 'email').toLowerCase();
+      if (!phone && !email) { if (r.some((c) => String(c ?? '').trim())) errors.push(`Linha ${headerIdx + i + 2}: sem telefone`); return; }
+      const tags = str(r, 'tags').split(/[,;|]/).map((t) => t.trim()).filter(Boolean);
+      leads.push({ key: phone || email, name: str(r, 'name'), phone: phone || undefined, email: email || undefined, list: str(r, 'list') || undefined,
+        originStage: str(r, 'stage') || undefined, tags: tags.length ? tags : undefined, firstSeenAt: toISODate(get(r, 'date')) || undefined, notes: str(r, 'notes') || undefined });
+    });
+    return { payload: { source, leads }, rowErrors: errors, rows: leads.length };
   }
 
   const clients = new Map<string, ImpClient>();

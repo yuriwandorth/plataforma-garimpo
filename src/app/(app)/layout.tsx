@@ -16,6 +16,7 @@ const NAV: { group: string; items: { href: string; label: string; owner?: boolea
     { href: '/cobrancas/', label: 'Cobranças' },
   ] },
   { group: 'Comercial', items: [
+    { href: '/leads/', label: 'Leads' },
     { href: '/vendas/', label: 'Vendas' },
     { href: '/pedidos/', label: 'Checkout e pedidos' },
     { href: '/metas/', label: 'Metas por canal' },

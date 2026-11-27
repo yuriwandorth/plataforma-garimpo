@@ -63,6 +63,6 @@ describe('importação', () => {
     expect(again.sales).toHaveLength(0);
     expect(again.influencers).toHaveLength(0);
     expect(again.plans).toHaveLength(0);
-    expect(again.skipped).toEqual({ influencers: 1, clients: 2, sales: 3 });
+    expect(again.skipped).toEqual({ influencers: 1, clients: 2, sales: 3, leads: 0 });
   });
 });
