@@ -65,7 +65,8 @@ service cloud.firestore {
       // Configurações comerciais: só o dono altera
       match /channels/{id} {
         allow read: if active(t);
-        allow write: if owner(t);
+        // tenantOwnerUid usa getAfter: permite criar os canais padrão no mesmo lote que abre a consultoria
+        allow write: if owner(t) || tenantOwnerUid(t) == request.auth.uid;
       }
 
       // Dados do dia a dia: todo membro ativo

@@ -36,6 +36,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!u) { setLoading(false); return; }
       setLoading(true);
       unsubProfile = onSnapshot(doc(db, 'users', u.uid), async (snap) => {
+        // Ignora a gravação local ainda não confirmada pelo servidor: se as regras recusarem, ela é desfeita
+        if (snap.metadata.hasPendingWrites) return;
         if (snap.exists()) {
           const p = snap.data() as UserDoc;
           setProfile(p);
