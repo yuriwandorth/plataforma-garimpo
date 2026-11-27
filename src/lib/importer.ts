@@ -29,7 +29,7 @@ export interface ImportPayload { source: string; influencers?: ImpInfluencer[]; 
 
 type WithId<T> = T & { id: string };
 export interface Existing {
-  clients: Pick<Client, 'id' | 'name' | 'email' | 'endDate' | 'deleted'>[];
+  clients: Pick<Client, 'id' | 'name' | 'email' | 'phone' | 'endDate' | 'deleted'>[];
   plans: Pick<Plan, 'id' | 'name' | 'period' | 'productId'>[];
   influencers: Pick<Influencer, 'id' | 'name' | 'handle' | 'email'>[];
   sales: (Pick<Sale, 'id' | 'clientId' | 'date' | 'gross'> & { importKey?: string })[];
@@ -162,6 +162,7 @@ export function planImport(p: ImportPayload, ex: Existing, opts: { productId: st
   // Leads: um por telefone (ou e-mail); se já existe, só soma lista/etiquetas; se já é aluna, entra como convertido
   const exLeads = (ex.leads ?? []).filter((l) => !l.deleted);
   const seen = new Map<string, number>();
+  const phoneFilled = new Set<string>();
   const allClients = [...live, ...out.clients.map((c) => ({ id: c.id, name: c.name, phone: c.phone, email: c.email, deleted: false }))];
   for (const l of p.leads ?? []) {
     const pk = phoneKey(l.phone);
@@ -182,7 +183,28 @@ export function planImport(p: ImportPayload, ex: Existing, opts: { productId: st
       if (tags.length !== (exist.tags ?? []).length) out.leadUpdates.push({ id: exist.id, data: { tags } });
       continue;
     }
-    const client = matchClient({ phone: l.phone, email: em }, allClients);
+    let client = matchClient({ phone: l.phone, email: em }, allClients);
+    let byName = false;
+    if (!client && l.name) {
+      // nome completo (2+ palavras) que bate com uma única aluna: nome inteiro ou primeiro + último nome
+      const t = norm(l.name).replace(/[^a-z\s]/g, ' ').split(' ').filter((w) => w.length > 1);
+      if (t.length >= 2) {
+        const fl = `${t[0]} ${t[t.length - 1]}`;
+        const hits = allClients.filter((c) => {
+          const ct = norm(c.name).replace(/[^a-z\s]/g, ' ').split(' ').filter((w) => w.length > 1);
+          // mesmo primeiro nome e todas as palavras do nome do WhatsApp aparecem no nome da aluna
+          return ct.length >= 2 && ct[0] === t[0] && (`${ct[0]} ${ct[ct.length - 1]}` === fl || t.every((w) => ct.includes(w)));
+        });
+        if (hits.length === 1) { client = hits[0]; byName = true; }
+      }
+    }
+    // aluna reconhecida sem telefone na ficha: ganha o telefone do lead
+    if (client && l.phone && !client.phone && !phoneFilled.has(client.id)) {
+      phoneFilled.add(client.id);
+      const isNew = out.clients.find((c) => c.id === client!.id);
+      if (isNew) isNew.phone = l.phone.replace(/\D/g, '');
+      else out.clientUpdates.push({ id: client.id, data: { phone: l.phone.replace(/\D/g, '') } });
+    }
     const id = opts.newId();
     seen.set(k, out.leads.length);
     out.leads.push({
@@ -191,6 +213,7 @@ export function planImport(p: ImportPayload, ex: Existing, opts: { productId: st
       stage: client ? 'convertido' : (l.stage ?? 'novo'), tags: l.tags?.length ? l.tags : undefined,
       firstSeenAt: l.firstSeenAt || undefined, lastContactAt: l.lastContactAt || undefined, notes: l.notes || undefined, channelId: l.channelId || undefined,
       clientId: client?.id,
+      ...(byName ? { notes: [l.notes, 'Ligada à aluna pelo nome'].filter(Boolean).join(' · ') } : {}),
     });
   }
   return out;

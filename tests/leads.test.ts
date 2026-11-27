@@ -53,4 +53,25 @@ describe('leads', () => {
     expect(r.skipped.leads).toBe(1);
     expect(r.warnings).toHaveLength(1);
   });
+
+  it('liga lead à aluna pelo nome completo (só se for única) e preenche o telefone dela', () => {
+    let n = 0;
+    const r = planImport({
+      source: 'waspeed',
+      leads: [
+        { key: '1', name: 'Luana Mayara', phone: '81911112222' },
+        { key: '2', name: 'Ana', phone: '81933334444' },
+        { key: '3', name: 'Carla Souza', phone: '81955556666' },
+      ],
+    }, { clients: [
+      { id: 'luana', name: 'Luana Mayara da Silva' } as Client,
+      { id: 'ana1', name: 'Ana Lima' } as Client,
+      { id: 'c1', name: 'Carla Maria Souza' } as Client, { id: 'c2', name: 'Carla Souza' } as Client,
+    ], plans: [], influencers: [], sales: [], leads: [] },
+    { productId: 'p', today: '2026-11-27', by: 'u', newId: () => `id${++n}` });
+    expect(r.leads.find((l) => l.name === 'Luana Mayara')).toMatchObject({ clientId: 'luana', stage: 'convertido' });
+    expect(r.leads.find((l) => l.name === 'Ana')?.clientId).toBeUndefined();
+    expect(r.leads.find((l) => l.name === 'Carla Souza')?.clientId).toBeUndefined();
+    expect(r.clientUpdates).toEqual([{ id: 'luana', data: { phone: '81911112222' } }]);
+  });
 });
