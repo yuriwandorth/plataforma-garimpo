@@ -33,7 +33,7 @@ export interface Existing {
   plans: Pick<Plan, 'id' | 'name' | 'period' | 'productId'>[];
   influencers: Pick<Influencer, 'id' | 'name' | 'handle' | 'email'>[];
   sales: (Pick<Sale, 'id' | 'clientId' | 'date' | 'gross'> & { importKey?: string })[];
-  leads?: Pick<Lead, 'id' | 'name' | 'phone' | 'email' | 'list' | 'tags' | 'deleted' | 'stage'>[];
+  leads?: Pick<Lead, 'id' | 'name' | 'phone' | 'email' | 'list' | 'tags' | 'deleted' | 'stage' | 'clientId'>[];
 }
 
 export interface ImportPlan {
@@ -52,6 +52,9 @@ export interface ImportPlan {
 
 const norm = (s?: string) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
 const handleKey = (s?: string) => norm(s).replace(/^@/, '');
+/** Palavras do nome sem apelidos da comunidade (ex.: "Garimpeira") */
+const nameTokens = (s?: string) => norm(s).replace(/[^a-z\s]/g, ' ').split(' ').filter((w) => w.length > 1 && !/^garimp(eir[oa]s?|o)$/.test(w));
+const hasLetters = (s?: string) => /[a-zà-ú]/i.test(s ?? '');
 
 /** Período deduzido do nome do plano quando não vier informado */
 export function periodFromName(name: string): Period | null {
@@ -177,22 +180,15 @@ export function planImport(p: ImportPayload, ex: Existing, opts: { productId: st
       continue;
     }
     const exist = exLeads.find((e) => (pk && phoneKey(e.phone) === pk) || (em && (e.email ?? '').toLowerCase() === em));
-    if (exist) {
-      out.skipped.leads++;
-      const tags = [...new Set([...(exist.tags ?? []), ...(l.tags ?? []), ...(l.list && l.list !== exist.list ? [l.list] : [])])];
-      if (tags.length !== (exist.tags ?? []).length) out.leadUpdates.push({ id: exist.id, data: { tags } });
-      continue;
-    }
     let client = matchClient({ phone: l.phone, email: em }, allClients);
     let byName = false;
     if (!client && l.name) {
-      // nome completo (2+ palavras) que bate com uma única aluna: nome inteiro ou primeiro + último nome
-      const t = norm(l.name).replace(/[^a-z\s]/g, ' ').split(' ').filter((w) => w.length > 1);
+      // nome (2+ palavras) que bate com uma única aluna: mesmo primeiro nome e o resto contido no nome dela
+      const t = nameTokens(l.name);
       if (t.length >= 2) {
         const fl = `${t[0]} ${t[t.length - 1]}`;
         const hits = allClients.filter((c) => {
-          const ct = norm(c.name).replace(/[^a-z\s]/g, ' ').split(' ').filter((w) => w.length > 1);
-          // mesmo primeiro nome e todas as palavras do nome do WhatsApp aparecem no nome da aluna
+          const ct = nameTokens(c.name);
           return ct.length >= 2 && ct[0] === t[0] && (`${ct[0]} ${ct[ct.length - 1]}` === fl || t.every((w) => ct.includes(w)));
         });
         if (hits.length === 1) { client = hits[0]; byName = true; }
@@ -205,10 +201,20 @@ export function planImport(p: ImportPayload, ex: Existing, opts: { productId: st
       if (isNew) isNew.phone = l.phone.replace(/\D/g, '');
       else out.clientUpdates.push({ id: client.id, data: { phone: l.phone.replace(/\D/g, '') } });
     }
+    if (exist) {
+      out.skipped.leads++;
+      const tags = [...new Set([...(exist.tags ?? []), ...(l.tags ?? []), ...(l.list && l.list !== exist.list ? [l.list] : [])])];
+      const data: Partial<Lead> = {};
+      if (tags.length !== (exist.tags ?? []).length) data.tags = tags;
+      if (client && !exist.clientId && exist.stage !== 'convertido') { data.clientId = client.id; data.stage = 'convertido'; }
+      if (!hasLetters(exist.name) && hasLetters(l.name)) data.name = l.name.trim();
+      if (Object.keys(data).length) out.leadUpdates.push({ id: exist.id, data });
+      continue;
+    }
     const id = opts.newId();
     seen.set(k, out.leads.length);
     out.leads.push({
-      id, importKey: `${src}:${l.key}`, name: (l.name || l.phone || em).trim(), phone: l.phone?.replace(/\D/g, '') || undefined, email: em || undefined,
+      id, importKey: `${src}:${l.key}`, name: (hasLetters(l.name) ? l.name : l.phone || em).trim(), phone: l.phone?.replace(/\D/g, '') || undefined, email: em || undefined,
       source: src.split(':')[0], list: l.list || undefined, originStage: l.originStage || undefined,
       stage: client ? 'convertido' : (l.stage ?? 'novo'), tags: l.tags?.length ? l.tags : undefined,
       firstSeenAt: l.firstSeenAt || undefined, lastContactAt: l.lastContactAt || undefined, notes: l.notes || undefined, channelId: l.channelId || undefined,

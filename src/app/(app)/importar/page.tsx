@@ -223,7 +223,7 @@ export default function ImportarPage() {
             <div className="grid gap-3 sm:grid-cols-4">
               {kind === 'leads' && !payload?.clients ? <>
                 <Stat label="Leads novos" value={plan.leads.length} sub={`${plan.skipped.leads} já existiam`} />
-                <Stat label="Já são alunas" value={plan.leads.filter((l) => l.stage === 'convertido').length} sub="reconhecidas pelo telefone" />
+                <Stat label="Já são alunas" value={plan.leads.filter((l) => l.stage === 'convertido').length} sub="reconhecidas pelo telefone ou nome" />
                 <Stat label="Listas" value={new Set(plan.leads.map((l) => l.list ?? '')).size} />
                 <Stat label="Leads atualizados" value={plan.leadUpdates.length} sub="ganharam lista/etiqueta nova" />
               </> : <>

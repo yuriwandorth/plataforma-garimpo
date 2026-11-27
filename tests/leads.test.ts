@@ -74,4 +74,16 @@ describe('leads', () => {
     expect(r.leads.find((l) => l.name === 'Carla Souza')?.clientId).toBeUndefined();
     expect(r.clientUpdates).toEqual([{ id: 'luana', data: { phone: '81911112222' } }]);
   });
+
+  it('ignora "Garimpeira" no nome e atualiza leads que já existiam', () => {
+    let n = 0;
+    const r = planImport({
+      source: 'waspeed',
+      leads: [{ key: '1', name: 'Kellen Freitas Garimpeira', phone: '81911112222' }, { key: '2', name: 'Bia Souza', phone: '81922223333' }],
+    }, { clients: [{ id: 'k', name: 'Kellen Cristina Freitas' } as Client, { id: 'b', name: 'Beatriz Souza' } as Client], plans: [], influencers: [], sales: [],
+      leads: [{ id: 'L1', name: '.', phone: '81911112222', stage: 'novo' }] },
+    { productId: 'p', today: '2026-11-27', by: 'u', newId: () => `id${++n}` });
+    expect(r.leadUpdates).toEqual([{ id: 'L1', data: { clientId: 'k', stage: 'convertido', name: 'Kellen Freitas Garimpeira' } }]);
+    expect(r.leads[0].clientId).toBeUndefined();
+  });
 });
