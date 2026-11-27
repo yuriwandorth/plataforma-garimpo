@@ -80,17 +80,34 @@ service cloud.firestore {
         allow delete: if owner(t);
       }
 
+      // Cupons: a aluna consulta um código por vez (não consegue listar); a equipe gerencia
+      match /coupons/{code} {
+        allow get: if active(t) || resource.data.active == true;
+        allow list: if active(t);
+        allow create, update: if active(t) && request.resource.data.pct is int && request.resource.data.pct >= 1 && request.resource.data.pct <= 90;
+        allow delete: if owner(t);
+      }
+
       // Pedidos do checkout: a aluna (sem login) só cria o pedido e registra a volta do pagamento.
       // Ninguém de fora lê pedidos. Pago só é marcado pela equipe, depois de conferir na InfinitePay.
       match /orders/{id} {
         function link() { return get(/databases/$(database)/documents/tenants/$(t)/checkouts/$(request.resource.data.checkoutId)).data; }
+        function coupon() { return get(/databases/$(database)/documents/tenants/$(t)/coupons/$(request.resource.data.couponCode)).data; }
         allow read: if active(t);
         allow create: if active(t) || (
-          request.resource.data.keys().hasOnly(['checkoutId', 'title', 'planId', 'planName', 'productId', 'period', 'price', 'name', 'email', 'phone', 'cpf', 'ref', 'acceptedTerms', 'termsText', 'acceptedAt', 'userAgent', 'status', 'createdAt'])
+          request.resource.data.keys().hasOnly(['checkoutId', 'title', 'planId', 'planName', 'productId', 'period', 'price', 'listPrice', 'couponCode', 'discountPct', 'name', 'email', 'phone', 'cpf', 'ref', 'acceptedTerms', 'termsText', 'acceptedAt', 'userAgent', 'status', 'createdAt'])
           && request.resource.data.status == 'aguardando'
           && request.resource.data.acceptedTerms == true
           && link().active == true
-          && request.resource.data.price == link().price
+          // sem cupom: preço cheio; com cupom: cupom ativo e desconto calculado igual ao da página
+          && (
+            (!('couponCode' in request.resource.data) && request.resource.data.price == link().price)
+            || ('couponCode' in request.resource.data
+              && coupon().active == true
+              && request.resource.data.discountPct == coupon().pct
+              && request.resource.data.listPrice == link().price
+              && request.resource.data.price == math.round(link().price * (100 - coupon().pct)) / 100.0)
+          )
           && request.resource.data.planId == link().planId
           && request.resource.data.termsText == link().terms
           && request.resource.data.name is string && request.resource.data.name.size() > 1 && request.resource.data.name.size() <= 120

@@ -24,6 +24,8 @@ export interface Influencer {
   handle: string;
   email?: string;
   coupon?: string;
+  /** % de desconto do cupom no checkout (padrão 10) */
+  couponPct?: number;
   stage: InfluencerStage;
   modelId?: string;
   deal: DealType;

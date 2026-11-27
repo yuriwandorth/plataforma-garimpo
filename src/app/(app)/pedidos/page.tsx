@@ -7,15 +7,16 @@ import { useCollection, useWriter } from '@/lib/db';
 import { useChannels, useClients, useInfluencers, usePlans, useProducts } from '@/lib/hooks';
 import { fmtBRL2, fmtDate, parseMoney, todayISO } from '@/lib/calc';
 import {
-  checkPayment, checkoutUrl, DEFAULT_TERMS, isAbandoned, ORDER_STATUS, onlyDigits, saleFromOrder,
-  type CheckoutLink, type Order,
+  checkPayment, checkoutUrl, couponCode, DEFAULT_COUPON_PCT, DEFAULT_TERMS, isAbandoned, ORDER_STATUS, onlyDigits, saleFromOrder,
+  type CheckoutLink, type Coupon, type Order,
 } from '@/lib/checkout';
+import { syncInfluencerCoupon } from '@/lib/couponSync';
 import type { Client } from '@/lib/types';
 import { PERIOD_LABEL } from '@/lib/types';
 import { Badge, Button, Card, Empty, ErrorNote, Field, Modal, PageHeader, Spinner, Stat, Tabs, Toggle } from '@/components/ui';
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH || '';
-type Tab = 'conferir' | 'abandonados' | 'concluidos' | 'links';
+type Tab = 'conferir' | 'abandonados' | 'concluidos' | 'links' | 'cupons';
 
 const wa = (phone: string, text: string) => {
   const d = onlyDigits(phone);
@@ -28,6 +29,8 @@ export default function PedidosPage() {
   const w = useWriter();
   const links = useCollection<CheckoutLink>('checkouts');
   const orders = useCollection<Order>('orders');
+  const coupons = useCollection<Coupon>('coupons');
+  const [editCoupon, setEditCoupon] = useState<Coupon | 'new' | null>(null);
   const clients = useClients();
   const [tab, setTab] = useState<Tab>('conferir');
   const [edit, setEdit] = useState<CheckoutLink | 'new' | null>(null);
@@ -90,7 +93,7 @@ export default function PedidosPage() {
       const sale = saleFromOrder(o, l, {
         id: clientId, name: client?.name ?? o.name, planName: client?.planName, endDate: client?.endDate,
         isTest: client?.isTest, hasHistory: !!client?.planId,
-      }, today, user!.uid);
+      }, today, user!.uid, o.couponCode ? coupons.data.find((c) => c.id === o.couponCode)?.influencerId : undefined);
       const saleId = await w.create('sales', sale, `Venda do checkout: ${o.name} · ${o.planName} · ${fmtBRL2(o.price)}`);
       if (!client?.endDate || sale.endDate >= client.endDate) {
         await w.update<Client>('clients', clientId, {
@@ -133,9 +136,12 @@ export default function PedidosPage() {
         { id: 'abandonados', label: `Não pagaram (${waiting.length})` },
         { id: 'concluidos', label: `Concluídos (${done.length})` },
         { id: 'links', label: `Links (${links.data.length})` },
+        { id: 'cupons', label: `Cupons (${coupons.data.filter((c) => c.active).length})` },
       ]} />
 
-      {orders.loading || links.loading ? <Spinner /> : tab === 'links' ? (
+      {orders.loading || links.loading ? <Spinner /> : tab === 'cupons' ? (
+        <CouponsTab coupons={coupons.data} onEdit={setEditCoupon} />
+      ) : tab === 'links' ? (
         links.data.length === 0 ? <Empty title="Nenhum link de pagamento" text="Crie um link por plano. A aluna abre, preenche, aceita os termos e paga por Pix ou cartão na InfinitePay." action={<Button onClick={() => setEdit('new')}>Criar o primeiro</Button>} /> : (
           <div className="grid gap-3 md:grid-cols-2">
             {[...links.data].sort((a, b) => Number(b.active) - Number(a.active) || a.title.localeCompare(b.title)).map((l) => (
@@ -147,7 +153,7 @@ export default function PedidosPage() {
                   <Button size="sm" variant="outline" disabled={!l.active} onClick={() => copy(l)}>{copied === l.id ? 'Link copiado' : 'Copiar link'}</Button>
                   <a className="inline-flex items-center rounded-lg border border-line px-2.5 py-1.5 text-xs hover:border-gold/60" href={checkoutUrl('', BASE, tenant!.id, l.id)} target="_blank" rel="noreferrer">Abrir página</a>
                 </div>
-                <p className="mt-2 text-xs text-mute">Para saber de onde veio a venda, acrescente <code>&ref=nome</code> no fim do link (ex.: cupom da influencer).</p>
+                <p className="mt-2 text-xs text-mute">Para o cupom já vir aplicado, acrescente <code>&cupom=CODIGO</code> no fim do link. Para marcar a origem sem desconto, use <code>&ref=nome</code>.</p>
               </Card>
             ))}
           </div>
@@ -171,7 +177,7 @@ export default function PedidosPage() {
                       <tr key={o.id} className="border-b border-line/60 align-top">
                         <td className="td text-xs text-mute">{when(o.createdAt)}{o.ref && <div>ref: {o.ref}</div>}</td>
                         <td className="td"><div className="font-medium">{o.name}</div><div className="text-xs text-mute">{o.email} · {o.phone}</div></td>
-                        <td className="td">{o.planName}<div className="text-xs text-mute">{fmtBRL2(o.price)}{o.check?.paidAmount ? ` · aluna pagou ${fmtBRL2(o.check.paidAmount / 100)}` : ''}{o.check?.installments ? ` · ${o.check.installments}x` : ''}{o.check?.method ? ` · ${o.check.method === 'pix' ? 'Pix' : 'cartão'}` : ''}</div></td>
+                        <td className="td">{o.planName}<div className="text-xs text-mute">{o.couponCode && <span className="text-good">cupom {o.couponCode} (-{o.discountPct}%) · </span>}{fmtBRL2(o.price)}{o.check?.paidAmount ? ` · aluna pagou ${fmtBRL2(o.check.paidAmount / 100)}` : ''}{o.check?.installments ? ` · ${o.check.installments}x` : ''}{o.check?.method ? ` · ${o.check.method === 'pix' ? 'Pix' : 'cartão'}` : ''}</div></td>
                         <td className="td"><Badge tone={st.tone}>{busy === o.id ? 'Conferindo…' : st.label}</Badge>
                           {o.check?.manual && <div className="text-xs text-mute">marcado manualmente</div>}
                           {o.ret?.receipt_url && <div><a className="text-xs text-gold hover:underline" href={o.ret.receipt_url} target="_blank" rel="noreferrer">comprovante</a></div>}</td>
@@ -198,6 +204,7 @@ export default function PedidosPage() {
       )}
 
       {edit && <LinkModal link={edit === 'new' ? undefined : edit} onClose={() => setEdit(null)} />}
+      {editCoupon && <CouponModal coupon={editCoupon === 'new' ? undefined : editCoupon} existing={coupons.data} onClose={() => setEditCoupon(null)} />}
     </div>
   );
 }
@@ -295,6 +302,96 @@ function LinkModal({ link, onClose }: { link?: CheckoutLink; onClose: () => void
           <textarea className="input min-h-[220px] font-mono text-xs" value={terms} onChange={(e) => setTerms(e.target.value)} />
         </Field>
         <div className="sm:col-span-2"><Toggle checked={active} onChange={setActive} label="Link ativo" hint="Desativado, a página mostra 'link indisponível'." /></div>
+      </div>
+      <ErrorNote error={err} />
+    </Modal>
+  );
+}
+
+function CouponsTab({ coupons, onEdit }: { coupons: Coupon[]; onEdit: (c: Coupon | 'new') => void }) {
+  const w = useWriter();
+  const influencers = useInfluencers();
+  const [msg, setMsg] = useState('');
+  const sorted = [...coupons].sort((a, b) => Number(b.active) - Number(a.active) || a.code.localeCompare(b.code));
+  const withCoupon = influencers.data.filter((i) => i.coupon);
+
+  async function importAll() {
+    let n = 0;
+    for (const i of withCoupon) { await syncInfluencerCoupon(w, i); n++; }
+    setMsg(n ? `${n} cupom(ns) de influencer atualizado(s). Ficam ativos só os de parceria fechada.` : 'Nenhuma influencer tem cupom cadastrado.');
+  }
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Button onClick={() => onEdit('new')}>Novo cupom</Button>
+        <Button variant="outline" onClick={importAll}>Trazer cupons das influencers</Button>
+        {msg && <span className="text-sm text-good">{msg}</span>}
+      </div>
+      <p className="mb-4 text-sm text-mute">O cupom cadastrado na influencer vira cupom aqui sozinho (padrão {DEFAULT_COUPON_PCT}%). A venda com o cupom dela entra no canal Influencer e conta para a comissão.</p>
+      {sorted.length === 0 ? <Empty title="Nenhum cupom" text="Crie um cupom ou traga os cupons das influencers." /> : (
+        <div className="card overflow-x-auto">
+          <table className="w-full">
+            <thead><tr className="border-b border-line"><th className="th">Cupom</th><th className="th">Desconto</th><th className="th">Influencer</th><th className="th">Situação</th><th className="th" /></tr></thead>
+            <tbody>
+              {sorted.map((c) => (
+                <tr key={c.id} className="border-b border-line/60">
+                  <td className="td font-mono font-medium">{c.code}</td>
+                  <td className="td">{c.pct}%</td>
+                  <td className="td">{c.influencerName ?? <span className="text-mute">—</span>}</td>
+                  <td className="td"><Badge tone={c.active ? 'good' : 'mute'}>{c.active ? 'Ativo' : 'Desativado'}</Badge></td>
+                  <td className="td"><div className="flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => w.update<Coupon>('coupons', c.id, { active: !c.active }, `Cupom ${c.code} ${c.active ? 'desativado' : 'ativado'}`)}>{c.active ? 'Desativar' : 'Ativar'}</Button>
+                    <Button size="sm" variant="outline" onClick={() => onEdit(c)}>Editar</Button>
+                  </div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CouponModal({ coupon, existing, onClose }: { coupon?: Coupon; existing: Coupon[]; onClose: () => void }) {
+  const w = useWriter();
+  const influencers = useInfluencers();
+  const [code, setCode] = useState(coupon?.code ?? '');
+  const [pct, setPct] = useState(String(coupon?.pct ?? DEFAULT_COUPON_PCT));
+  const [influencerId, setInfluencerId] = useState(coupon?.influencerId ?? '');
+  const [active, setActive] = useState(coupon?.active ?? true);
+  const [err, setErr] = useState('');
+
+  async function save() {
+    setErr('');
+    const c = couponCode(code);
+    const p = Math.round(Number(pct));
+    if (c.length < 3) return setErr('O código precisa ter pelo menos 3 letras ou números.');
+    if (!(p >= 1 && p <= 90)) return setErr('O desconto vai de 1% a 90%.');
+    if (!coupon && existing.some((x) => x.id === c)) return setErr('Já existe um cupom com esse código.');
+    const inf = influencers.byId[influencerId];
+    const data = { code: c, pct: p, active, influencerId: influencerId || undefined, influencerName: inf?.name, updatedAt: Date.now() };
+    try {
+      if (coupon) await w.update<Coupon>('coupons', coupon.id, data, `Cupom ${c} editado`);
+      else await w.create('coupons', data, `Cupom ${c} criado (${p}%)`, c);
+      onClose();
+    } catch (e) { console.error(e); setErr('Não foi possível salvar.'); }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={coupon ? `Editar cupom ${coupon.code}` : 'Novo cupom'}
+      footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button onClick={save}>Salvar cupom</Button></>}>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Código" hint="Letras e números, sem espaço."><input className="input font-mono uppercase" disabled={!!coupon} value={code} onChange={(e) => setCode(e.target.value)} placeholder="ex.: GEO10" /></Field>
+        <Field label="Desconto (%)"><input className="input" type="number" min={1} max={90} value={pct} onChange={(e) => setPct(e.target.value)} /></Field>
+        <Field label="Influencer (opcional)" className="sm:col-span-2" hint="A venda com este cupom fica no nome dela.">
+          <select className="input" value={influencerId} onChange={(e) => setInfluencerId(e.target.value)}>
+            <option value="">Nenhuma</option>
+            {influencers.data.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+          </select>
+        </Field>
+        <div className="sm:col-span-2"><Toggle checked={active} onChange={setActive} label="Cupom ativo" /></div>
       </div>
       <ErrorNote error={err} />
     </Modal>

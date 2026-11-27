@@ -10,6 +10,7 @@ import type { Sale } from '@/lib/types';
 import { Badge, Button, Card, cx, ErrorNote, PageHeader, Spinner, Stat, Tabs } from '@/components/ui';
 import { MonthPicker } from '@/components/MonthPicker';
 import { CommissionModelsModal, InfluencerModal } from '@/components/InfluencerForms';
+import { syncInfluencerCoupon } from '@/lib/couponSync';
 
 const DEAL = { permuta: 'permuta', comissao: 'comissão', ambos: 'permuta + comissão' } as const;
 
@@ -27,6 +28,7 @@ export default function InfluencersPage() {
     if (i.stage === stage) return;
     if (stage === 'fechado' && !i.email) { setEdit({ ...i, stage }); return; }
     await w.update<Influencer>('influencers', i.id, { stage }, `${i.name} movida para ${STAGES.find((s) => s.id === stage)!.label}`);
+    if (i.coupon) await syncInfluencerCoupon(w, { ...i, stage }).catch(() => {});
   }
 
   return (

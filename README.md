@@ -80,7 +80,7 @@ Crie um repositório **privado** no GitHub e envie a pasta inteira. O arquivo `.
 | Comando | Para quê |
 | --- | --- |
 | `npm run dev` | Rodar no computador |
-| `npm test` | Conferir os cálculos dos indicadores (46 testes) |
+| `npm test` | Conferir os cálculos dos indicadores (48 testes) |
 | `npm run deploy` | Publicar o site |
 | `npx firebase deploy --only firestore:rules` | Publicar as regras de novo, se eu mudar o arquivo `firestore.rules` |
 
@@ -88,8 +88,9 @@ Crie um repositório **privado** no GitHub e envie a pasta inteira. O arquivo `.
 
 1. No painel da InfinitePay (Conta Web), em **Configurações do Checkout**, ligue **Habilitar checkout integrado**. Ali também ficam as regras de parcelamento e de repasse de juros.
 2. Em **Configurações** da plataforma, preencha a InfiniteTag (sem o $) e o WhatsApp da consultoria.
-3. Em **Checkout e pedidos**, crie um link por plano e copie. Acrescente `&ref=nome` no fim para saber de onde veio a venda.
-4. Faça uma compra de teste de R$ 1,00 (a InfinitePay não tem ambiente de teste) e depois estorne pelo app.
+3. Em **Checkout e pedidos**, crie um link por plano e copie. Acrescente `&cupom=CODIGO` para o desconto já vir aplicado, ou `&ref=nome` só para marcar a origem.
+4. Cupons: o cupom cadastrado na influencer vira cupom de desconto sozinho (10% por padrão) quando a parceria está fechada. Cupons avulsos ficam na aba **Cupons**.
+5. Faça uma compra de teste de R$ 1,00 (a InfinitePay não tem ambiente de teste) e depois estorne pelo app.
 
 Sem servidor, a confirmação depende de a aluna voltar para a página de obrigado. Se ela fechar a página antes, o pedido fica em "Não pagaram": confira no app da InfinitePay e use "Recebi por fora". A confirmação automática por webhook precisa do plano pago do Firebase (Blaze).
 

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { collection, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db, firebaseConfigured } from '@/lib/firebase';
-import { createPaymentLink, onlyDigits, phoneE164, validCPF, validEmail, type CheckoutLink, type Order } from '@/lib/checkout';
+import { couponCode, createPaymentLink, discounted, onlyDigits, phoneE164, validCPF, validEmail, type CheckoutLink, type Coupon, type Order } from '@/lib/checkout';
 import { fmtBRL2 } from '@/lib/calc';
 import { PERIOD_LABEL, PERIOD_MONTHS } from '@/lib/types';
 import { Button, Field } from '@/components/ui';
@@ -20,6 +20,9 @@ export default function PagarPage() {
   const [phone, setPhone] = useState('');
   const [cpf, setCpf] = useState('');
   const [agree, setAgree] = useState(false);
+  const [code, setCode] = useState('');
+  const [coupon, setCoupon] = useState<Coupon | null>(null);
+  const [couponMsg, setCouponMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -33,10 +36,26 @@ export default function PagarPage() {
       .then((s) => {
         const d = s.exists() ? ({ id: s.id, ...s.data() } as CheckoutLink) : null;
         if (!d || !d.active) setState('off');
-        else { setLink(d); setState('ok'); document.title = `${d.title} · ${d.brand}`; }
+        else {
+          setLink(d); setState('ok'); document.title = `${d.title} · ${d.brand}`;
+          const fromUrl = couponCode(p.get('cupom') ?? '');
+          if (fromUrl) { setCode(fromUrl); applyCoupon(t, fromUrl); }
+        }
       })
       .catch(() => setState('off'));
   }, []);
+
+  async function applyCoupon(t: string, raw: string) {
+    const c = couponCode(raw);
+    setCouponMsg(''); setCoupon(null);
+    if (!c) return;
+    try {
+      const snap = await getDoc(doc(db, 'tenants', t, 'coupons', c));
+      const d = snap.exists() ? ({ id: snap.id, ...snap.data() } as Coupon) : null;
+      if (!d || !d.active) return setCouponMsg('Cupom inválido ou expirado.');
+      setCoupon(d); setCode(c);
+    } catch { setCouponMsg('Cupom inválido ou expirado.'); }
+  }
 
   async function pay() {
     setErr('');
@@ -45,22 +64,25 @@ export default function PagarPage() {
     if (!validEmail(email)) return setErr('Confira seu e-mail.');
     if (!phoneE164(phone)) return setErr('Confira seu WhatsApp com DDD.');
     if (cpf && !validCPF(cpf)) return setErr('Confira seu CPF (ou deixe em branco).');
+    if (code.trim() && !coupon) return setErr('Toque em "Aplicar" no cupom, ou apague o campo para seguir sem desconto.');
     if (!agree) return setErr('Para seguir, marque que leu e concorda com os termos.');
     setBusy(true);
     try {
       const ref = doc(collection(db, 'tenants', ids.t, 'orders'));
       const now = Date.now();
       const order: Omit<Order, 'id'> = {
-        checkoutId: link.id, title: link.title, planId: link.planId, planName: link.planName, period: link.period, price: link.price,
+        checkoutId: link.id, title: link.title, planId: link.planId, planName: link.planName, period: link.period,
+        price: coupon ? discounted(link.price, coupon.pct) : link.price,
+        ...(coupon ? { listPrice: link.price, couponCode: coupon.code, discountPct: coupon.pct } : {}),
         name: name.trim(), email: email.trim().toLowerCase(), phone: onlyDigits(phone), acceptedTerms: true, termsText: link.terms,
         acceptedAt: now, userAgent: navigator.userAgent.slice(0, 200), status: 'aguardando', createdAt: now,
         ...(link.productId ? { productId: link.productId } : {}),
         ...(cpf ? { cpf: onlyDigits(cpf) } : {}),
-        ...(ids.ref ? { ref: ids.ref } : {}),
+        ...(ids.ref || coupon ? { ref: ids.ref || coupon!.code } : {}),
       };
       await setDoc(ref, order);
       const back = `${window.location.origin}${BASE}/pagar/retorno/?t=${encodeURIComponent(ids.t)}&c=${encodeURIComponent(link.id)}&o=${ref.id}`;
-      const url = await createPaymentLink(link, { id: ref.id, name: order.name, email: order.email, phone: order.phone }, back);
+      const url = await createPaymentLink(link, { id: ref.id, name: order.name, email: order.email, phone: order.phone, price: order.price, couponCode: order.couponCode }, back);
       await updateDoc(ref, { linkUrl: url, updatedAt: Date.now() }).catch(() => {});
       window.location.href = url;
     } catch (e) {
@@ -85,7 +107,13 @@ export default function PagarPage() {
       {link.description && <p className="mt-2 whitespace-pre-line text-sm text-mute">{link.description}</p>}
       <div className="mt-4 rounded-xl border border-gold/40 bg-gold/10 p-4">
         <div className="text-xs uppercase tracking-wide text-mute">{PERIOD_LABEL[link.period]} · {months} {months === 1 ? 'mês' : 'meses'}</div>
-        <div className="mt-1 text-3xl font-semibold">{fmtBRL2(link.price)}</div>
+        {coupon ? (
+          <>
+            <div className="mt-1 text-sm text-mute line-through">{fmtBRL2(link.price)}</div>
+            <div className="text-3xl font-semibold">{fmtBRL2(discounted(link.price, coupon.pct))}</div>
+            <div className="mt-1 text-xs font-medium text-good">Cupom {coupon.code} aplicado: {coupon.pct}% de desconto</div>
+          </>
+        ) : <div className="mt-1 text-3xl font-semibold">{fmtBRL2(link.price)}</div>}
         <div className="mt-1 text-xs text-mute">Pix ou cartão em até 12x. As condições aparecem na próxima tela.</div>
       </div>
 
@@ -94,6 +122,15 @@ export default function PagarPage() {
         <Field label="E-mail"><input className="input" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
         <Field label="WhatsApp com DDD"><input className="input" type="tel" autoComplete="tel" placeholder="(81) 99999-9999" value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
         <Field label="CPF (opcional)" hint="Para a nota fiscal."><input className="input" inputMode="numeric" value={cpf} onChange={(e) => setCpf(e.target.value)} /></Field>
+        <div>
+          <span className="label">Cupom de desconto (opcional)</span>
+          <div className="flex gap-2">
+            <input className="input uppercase" aria-label="Cupom de desconto" value={code} onChange={(e) => { setCode(e.target.value); if (coupon) setCoupon(null); setCouponMsg(''); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyCoupon(ids!.t, code); } }} />
+            <Button type="button" variant="outline" onClick={() => applyCoupon(ids!.t, code)} disabled={!code.trim()}>Aplicar</Button>
+          </div>
+          {couponMsg && <span className="mt-1 block text-xs text-bad">{couponMsg}</span>}
+        </div>
       </div>
 
       <div className="mt-5">

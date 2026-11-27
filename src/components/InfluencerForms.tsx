@@ -4,6 +4,8 @@ import { useCollection, useWriter } from '@/lib/db';
 import { addMonths, todayISO, parseMoney, fmtBRL } from '@/lib/calc';
 import { DEFAULT_TIERS, NETWORKS, type CommissionModel, type DealType, type Influencer, type Tier } from '@/lib/growth';
 import { Button, Field, Modal, Toggle } from './ui';
+import { syncInfluencerCoupon } from '@/lib/couponSync';
+import { DEFAULT_COUPON_PCT } from '@/lib/checkout';
 
 export function InfluencerModal({ open, onClose, influencer, defaultStage = 'prospectar' }: {
   open: boolean; onClose: () => void; influencer?: Influencer; defaultStage?: Influencer['stage'];
@@ -25,12 +27,16 @@ export function InfluencerModal({ open, onClose, influencer, defaultStage = 'pro
     if (f.stage === 'fechado' && !f.email?.trim()) return setErr('Para fechar, informe o e-mail da influencer.');
     const data: Partial<Influencer> = {
       name: f.name.trim(), network: f.network ?? 'Instagram', handle: f.handle.trim().replace(/^@/, ''), email: f.email?.trim() || undefined,
-      coupon: f.coupon?.trim().toUpperCase() || undefined, stage: f.stage ?? 'prospectar', modelId: f.modelId || undefined, deal: f.deal ?? 'permuta',
+      coupon: f.coupon?.trim().toUpperCase().replace(/\s+/g, '') || undefined, couponPct: f.coupon?.trim() ? Math.round(Number(f.couponPct) || DEFAULT_COUPON_PCT) : undefined, stage: f.stage ?? 'prospectar', modelId: f.modelId || undefined, deal: f.deal ?? 'permuta',
       trialStart: f.trialStart || undefined, trialEnd: f.trialEnd || undefined, storiesPerMonth: Number(f.storiesPerMonth) || 0,
       reelsPerMonth: Number(f.reelsPerMonth) || 0, active: f.active !== false, notes: f.notes?.trim() || undefined,
     };
+    let id = influencer?.id;
     if (influencer) await w.update<Influencer>('influencers', influencer.id, data, `Influencer editada: ${data.name}`);
-    else await w.create('influencers', data, `Influencer adicionada: ${data.name}`);
+    else id = await w.create('influencers', data, `Influencer adicionada: ${data.name}`);
+    try {
+      await syncInfluencerCoupon(w, { id: id!, name: data.name!, coupon: data.coupon, couponPct: data.couponPct, stage: data.stage!, active: data.active! }, influencer?.coupon);
+    } catch (e) { console.error('cupom', e); }
     onClose();
   }
 
@@ -47,7 +53,8 @@ export function InfluencerModal({ open, onClose, influencer, defaultStage = 'pro
           <Field label="@ / usuário"><input className="input" value={f.handle ?? ''} onChange={(e) => set('handle', e.target.value)} placeholder="usuario" /></Field>
         </div>
         <Field label="E-mail" hint="Obrigatório ao fechar."><input className="input" type="email" value={f.email ?? ''} onChange={(e) => set('email', e.target.value)} /></Field>
-        <Field label="Cupom de divulgação"><input className="input" value={f.coupon ?? ''} onChange={(e) => set('coupon', e.target.value)} placeholder="ex.: BIA10" /></Field>
+        <Field label="Cupom de divulgação" hint="Vira cupom de desconto no checkout quando a parceria está fechada."><input className="input" value={f.coupon ?? ''} onChange={(e) => set('coupon', e.target.value)} placeholder="ex.: BIA10" /></Field>
+        <Field label="Desconto do cupom (%)"><input className="input" type="number" min={1} max={90} value={f.couponPct ?? DEFAULT_COUPON_PCT} onChange={(e) => set('couponPct', Number(e.target.value))} /></Field>
         <Field label="Etapa do funil">
           <select className="input" value={f.stage} onChange={(e) => set('stage', e.target.value as Influencer['stage'])}>
             <option value="prospectar">A prospectar</option><option value="prospectando">Prospectando</option><option value="negociacao">Em negociação</option><option value="fechado">Fechado</option><option value="perdido">Perdido</option>

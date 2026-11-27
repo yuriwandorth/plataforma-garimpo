@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cents, findUrl, isAbandoned, linkPayload, phoneE164, readReturn, saleFromOrder, validCPF, validEmail, type Order } from '../src/lib/checkout';
+import { cents, couponCode, discounted, findUrl, isAbandoned, linkPayload, phoneE164, readReturn, saleFromOrder, validCPF, validEmail, type Order } from '../src/lib/checkout';
 
 describe('checkout', () => {
   it('converte reais em centavos', () => {
@@ -29,8 +29,8 @@ describe('checkout', () => {
   });
 
   it('monta o pedido para a InfinitePay', () => {
-    const p = linkPayload({ handle: '$garimpo ', title: 'Treino e dieta · Trimestral', price: 597 },
-      { id: 'abc', name: 'Ana', email: 'a@a.com', phone: '81999998888' }, 'https://x/retorno');
+    const p = linkPayload({ handle: '$garimpo ', title: 'Treino e dieta · Trimestral' },
+      { id: 'abc', name: 'Ana', email: 'a@a.com', phone: '81999998888', price: 597 }, 'https://x/retorno');
     expect(p.handle).toBe('garimpo');
     expect(p.items[0]).toEqual({ description: 'Treino e dieta · Trimestral', price: 59700, quantity: 1 });
     expect(p.order_nsu).toBe('abc');
@@ -73,5 +73,25 @@ describe('checkout', () => {
     expect(s.prevPlanName).toBe('Antigo');
     const late = saleFromOrder(order, undefined, { id: 'cl', name: 'Ana', hasHistory: true, endDate: '2026-10-01' }, '2026-11-27', 'u');
     expect(late.startDate).toBe('2026-11-27');
+  });
+
+  it('cupom: código limpo e desconto em centavos', () => {
+    expect(couponCode(' geo 10! ')).toBe('GEO10');
+    expect(couponCode('Bárbara10')).toBe('BARBARA10');
+    expect(discounted(2497, 10)).toBe(2247.3);
+    expect(discounted(850, 10)).toBe(765);
+    expect(discounted(1600, 15)).toBe(1360);
+    expect(discounted(849.9, 10)).toBe(764.91);
+  });
+
+  it('pedido com cupom cobra o valor com desconto e credita a influencer', () => {
+    const p = linkPayload({ handle: 'g', title: 'Garimpo Anual' }, { id: 'x', name: 'A', email: 'a@a.com', phone: '', price: 2247.3, couponCode: 'GEO10' }, 'https://x');
+    expect(p.items[0]).toEqual({ description: 'Garimpo Anual (cupom GEO10)', price: 224730, quantity: 1 });
+    const s = saleFromOrder({ ...order, price: 537.3, listPrice: 597, couponCode: 'GEO10', discountPct: 10 }, { channelId: 'organico', influencerId: 'outra' },
+      { id: 'cl', name: 'Ana', hasHistory: false }, '2026-11-27', 'u', 'inf1');
+    expect(s.gross).toBe(537.3);
+    expect(s.influencerId).toBe('inf1');
+    expect(s.channelId).toBe('influencer');
+    expect(s.notes).toContain('cupom GEO10');
   });
 });

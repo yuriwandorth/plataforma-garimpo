@@ -31,6 +31,31 @@ export interface CheckoutLink {
   updatedAt: number;
 }
 
+/** tenants/{t}/coupons/{CÓDIGO} — a aluna consulta pelo código (leitura pública só do cupom ativo) */
+export interface Coupon {
+  id: string;
+  code: string;
+  /** % de desconto (1 a 90) */
+  pct: number;
+  active: boolean;
+  influencerId?: string;
+  influencerName?: string;
+  createdAt?: number;
+  updatedAt: number;
+}
+
+export const DEFAULT_COUPON_PCT = 10;
+
+/** Código do cupom: maiúsculo, sem espaço nem acento, até 30 caracteres */
+export function couponCode(s: string): string {
+  return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 30);
+}
+
+/** Preço com desconto, arredondado em centavos (a regra do banco faz a mesma conta) */
+export function discounted(price: number, pct: number): number {
+  return Math.round(price * (100 - pct)) / 100;
+}
+
 export type OrderStatus = 'aguardando' | 'retornou' | 'pago' | 'nao_pago' | 'concluido' | 'cancelado';
 
 export interface OrderReturn {
@@ -60,7 +85,12 @@ export interface Order {
   planName: string;
   productId?: string;
   period: Period;
+  /** Valor final cobrado (com desconto, se houver cupom) */
   price: number;
+  /** Preço cheio do link, quando tem cupom */
+  listPrice?: number;
+  couponCode?: string;
+  discountPct?: number;
   name: string;
   email: string;
   phone: string;
@@ -146,11 +176,11 @@ export function findUrl(v: unknown): string | null {
 }
 
 /** Corpo do POST /links */
-export function linkPayload(link: Pick<CheckoutLink, 'handle' | 'title' | 'price'>, order: Pick<Order, 'id' | 'name' | 'email' | 'phone'>, redirectUrl: string) {
+export function linkPayload(link: Pick<CheckoutLink, 'handle' | 'title'>, order: Pick<Order, 'id' | 'name' | 'email' | 'phone' | 'price' | 'couponCode'>, redirectUrl: string) {
   const phone = phoneE164(order.phone);
   return {
     handle: link.handle.replace(/^\$/, '').trim(),
-    items: [{ description: link.title, price: cents(link.price), quantity: 1 }],
+    items: [{ description: order.couponCode ? `${link.title} (cupom ${order.couponCode})` : link.title, price: cents(order.price), quantity: 1 }],
     order_nsu: order.id,
     redirect_url: redirectUrl,
     customer: { name: order.name, email: order.email, ...(phone ? { phone_number: phone } : {}) },
@@ -171,7 +201,7 @@ export function readReturn(search: string): Omit<OrderReturn, 'at'> | null {
 }
 
 /** Cria o link de pagamento na InfinitePay */
-export async function createPaymentLink(link: CheckoutLink, order: Pick<Order, 'id' | 'name' | 'email' | 'phone'>, redirectUrl: string): Promise<string> {
+export async function createPaymentLink(link: CheckoutLink, order: Pick<Order, 'id' | 'name' | 'email' | 'phone' | 'price' | 'couponCode'>, redirectUrl: string): Promise<string> {
   const r = await fetch(`${IP_API}/links`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -220,6 +250,8 @@ export function saleFromOrder(
   client: { id: string; name: string; planName?: string; endDate?: string; isTest?: boolean; hasHistory: boolean },
   today: string,
   by: string,
+  /** Influencer dona do cupom usado (vale mais que a do link) */
+  couponInfluencerId?: string,
 ): Omit<Sale, 'id' | 'createdAt'> {
   const kind = client.hasHistory ? 'renovacao' : 'nova';
   const start = kind === 'renovacao' && client.endDate && client.endDate >= today ? addDays(client.endDate, 1) : today;
@@ -227,11 +259,12 @@ export function saleFromOrder(
   return {
     clientId: client.id, clientName: client.name, planId: o.planId, planName: o.planName, productId: o.productId,
     period: o.period, gross: o.price, fees: 0, date: today, startDate: start, endDate: planEndDate(start, o.period),
-    channelId: kind === 'renovacao' ? 'renovacao' : link?.channelId, influencerId: link?.influencerId,
+    channelId: kind === 'renovacao' ? 'renovacao' : couponInfluencerId ? 'influencer' : link?.channelId,
+    influencerId: couponInfluencerId ?? link?.influencerId,
     isRenewal: kind === 'renovacao', kind, prevPlanName: kind === 'renovacao' ? client.planName : undefined,
     status: 'aprovada', paymentMode: 'avista', parts: [], paymentMethod: method,
     installments: o.check?.installments || 1, isTest: !!client.isTest,
-    notes: `Checkout InfinitePay · pedido ${o.id}${o.ref ? ` · ref ${o.ref}` : ''}${o.check?.paidAmount ? ` · pago pela aluna R$ ${(o.check.paidAmount / 100).toFixed(2).replace('.', ',')}` : ''}${o.check?.manual ? ' · confirmado manualmente' : ''}`,
+    notes: `Checkout InfinitePay · pedido ${o.id}${o.couponCode ? ` · cupom ${o.couponCode} (${o.discountPct}% off, cheio ${o.listPrice})` : ''}${o.ref && o.ref !== o.couponCode ? ` · ref ${o.ref}` : ''}${o.check?.paidAmount ? ` · pago pela aluna R$ ${(o.check.paidAmount / 100).toFixed(2).replace('.', ',')}` : ''}${o.check?.manual ? ' · confirmado manualmente' : ''}`,
     createdBy: by,
   };
 }
