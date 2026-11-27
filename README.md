@@ -12,6 +12,7 @@ Gestão interna da consultoria: clientes, renovações, produtos e planos, venda
 | Clientes | Renovações | Por mês de referência: a renovar, realizadas, receita estimada, vencidas, taxa; WhatsApp e "Marcar renovado" |
 | Clientes | Cobranças | Sinal + restante e parcelado: a receber, recebidas, inadimplência, saldo em aberto; "Marcar recebido" |
 | Comercial | Vendas | Nova venda, renovação ou troca de plano; forma de recebimento; influencer e indicação; CSV |
+| Comercial | Checkout e pedidos | Link de pagamento por plano (InfinitePay, Pix ou cartão até 12x); a aluna aceita os termos e paga; a plataforma confere o pagamento na InfinitePay; um clique cria a aluna e a venda; lista de quem não pagou para chamar no WhatsApp |
 | Comercial | Metas por canal | Meta mensal em 4 semanas por canal, realizado automático + ajuste manual |
 | Comercial | Campanhas | Data, oferta, preços, meta e plano de ação por canal com táticas; realizado do período; resultado |
 | Comercial | Produtos, planos e Ofertas | Planos e o construtor de oferta em 5 passos com texto para WhatsApp |
@@ -79,19 +80,28 @@ Crie um repositório **privado** no GitHub e envie a pasta inteira. O arquivo `.
 | Comando | Para quê |
 | --- | --- |
 | `npm run dev` | Rodar no computador |
-| `npm test` | Conferir os cálculos dos indicadores (15 testes) |
+| `npm test` | Conferir os cálculos dos indicadores (46 testes) |
 | `npm run deploy` | Publicar o site |
 | `npx firebase deploy --only firestore:rules` | Publicar as regras de novo, se eu mudar o arquivo `firestore.rules` |
 
+## Checkout: como ativar
+
+1. No painel da InfinitePay (Conta Web), em **Configurações do Checkout**, ligue **Habilitar checkout integrado**. Ali também ficam as regras de parcelamento e de repasse de juros.
+2. Em **Configurações** da plataforma, preencha a InfiniteTag (sem o $) e o WhatsApp da consultoria.
+3. Em **Checkout e pedidos**, crie um link por plano e copie. Acrescente `&ref=nome` no fim para saber de onde veio a venda.
+4. Faça uma compra de teste de R$ 1,00 (a InfinitePay não tem ambiente de teste) e depois estorne pelo app.
+
+Sem servidor, a confirmação depende de a aluna voltar para a página de obrigado. Se ela fechar a página antes, o pedido fica em "Não pagaram": confira no app da InfinitePay e use "Recebi por fora". A confirmação automática por webhook precisa do plano pago do Firebase (Blaze).
+
 ## O que vem nas próximas etapas
 
-- **Fase 1 (resto):** OKR e atividades, agenda, base de conhecimento com IA, importação de planilha.
-- **Fase 2:** influencers (funil, comissão por faixa, permuta de 3 meses, painel da influencer), embaixadoras, checkout com webhooks, área da aluna (anamnese e feedbacks), notificações.
-- **Fase 3:** venda para outros profissionais (várias consultorias, painel de mentor, montador de treino e dieta).
+- **Próximas:** área da aluna (anamnese e feedbacks), funções com IA (campanhas, base de conhecimento, importação de planilha), notificações, confirmação de pagamento por webhook.
+- **Depois:** venda para outros profissionais (várias consultorias, painel de mentor). Treino e dieta continuam no treino.io.
 
 ## Limites desta versão
 
-- As vendas são lançadas à mão; o checkout integrado vem na Fase 2.
+- Vendas fora do checkout continuam lançadas à mão em Vendas.
+- Os termos padrão do checkout são um resumo para revisar com um advogado.
 - "Enviar acesso ao app" só fica registrado; o envio do convite chega com a área da aluna.
 - Permissões do time: quem é do time vê e edita clientes, vendas, planos e metas; só o(a) dono(a) mexe em time, canais e configurações e apaga vendas. Permissão por cargo vem depois.
 - As regras de segurança foram revisadas, mas não puderam ser testadas no emulador do Firebase no ambiente onde a plataforma foi feita. O teste do passo 5 (criar conta, carregar exemplos, lançar uma venda) confirma que estão funcionando.

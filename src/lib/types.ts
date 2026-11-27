@@ -18,6 +18,10 @@ export interface Tenant {
   milestonesStart?: string;
   /** Marcos de faturamento acumulado, em reais */
   milestones?: number[];
+  /** InfiniteTag da InfinitePay (sem o $), usada no checkout */
+  infinitePayHandle?: string;
+  /** WhatsApp da consultoria (só números) */
+  whatsapp?: string;
 }
 
 export interface Member {

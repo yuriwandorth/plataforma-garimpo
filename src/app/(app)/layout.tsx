@@ -16,6 +16,7 @@ const NAV: { group: string; items: { href: string; label: string; owner?: boolea
   ] },
   { group: 'Comercial', items: [
     { href: '/vendas/', label: 'Vendas' },
+    { href: '/pedidos/', label: 'Checkout e pedidos' },
     { href: '/metas/', label: 'Metas por canal' },
     { href: '/campanhas/', label: 'Campanhas' },
     { href: '/produtos/', label: 'Produtos e planos' },
@@ -33,7 +34,7 @@ const NAV: { group: string; items: { href: string; label: string; owner?: boolea
     { href: '/configuracoes/', label: 'Configurações', owner: true },
   ] },
 ];
-const SOON = ['Atendimento às alunas', 'Área da aluna', 'Checkout integrado'];
+const SOON = ['Atendimento às alunas', 'Área da aluna'];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { loading, user, profile, tenant, logout } = useSession();

@@ -73,6 +73,38 @@ service cloud.firestore {
         allow write: if owner(t) || tenantOwnerUid(t) == request.auth.uid;
       }
 
+      // Checkout: o link ativo é público (a aluna abre sem login)
+      match /checkouts/{id} {
+        allow read: if active(t) || resource.data.active == true;
+        allow create, update: if active(t);
+        allow delete: if owner(t);
+      }
+
+      // Pedidos do checkout: a aluna (sem login) só cria o pedido e registra a volta do pagamento.
+      // Ninguém de fora lê pedidos. Pago só é marcado pela equipe, depois de conferir na InfinitePay.
+      match /orders/{id} {
+        function link() { return get(/databases/$(database)/documents/tenants/$(t)/checkouts/$(request.resource.data.checkoutId)).data; }
+        allow read: if active(t);
+        allow create: if active(t) || (
+          request.resource.data.keys().hasOnly(['checkoutId', 'title', 'planId', 'planName', 'productId', 'period', 'price', 'name', 'email', 'phone', 'cpf', 'ref', 'acceptedTerms', 'termsText', 'acceptedAt', 'userAgent', 'status', 'createdAt'])
+          && request.resource.data.status == 'aguardando'
+          && request.resource.data.acceptedTerms == true
+          && link().active == true
+          && request.resource.data.price == link().price
+          && request.resource.data.planId == link().planId
+          && request.resource.data.termsText == link().terms
+          && request.resource.data.name is string && request.resource.data.name.size() > 1 && request.resource.data.name.size() <= 120
+          && request.resource.data.email is string && request.resource.data.email.size() <= 160
+          && request.resource.data.phone is string && request.resource.data.phone.size() <= 30
+        );
+        allow update: if active(t) || (
+          resource.data.status == 'aguardando'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linkUrl', 'ret', 'status', 'updatedAt'])
+          && request.resource.data.status in ['aguardando', 'retornou']
+        );
+        allow delete: if owner(t);
+      }
+
       // Dados do dia a dia: todo membro ativo
       match /{col}/{id} {
         allow read: if active(t) && col in ['clients', 'products', 'plans', 'sales', 'goals', 'offers', 'influencers', 'commissionModels', 'influencerMonths', 'ambassadors', 'okrs', 'activities', 'campaigns', 'knowledge', 'assessments'];

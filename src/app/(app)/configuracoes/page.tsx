@@ -16,6 +16,8 @@ export default function ConfiguracoesPage() {
   const [name, setName] = useState('');
   const [mStart, setMStart] = useState('');
   const [mList, setMList] = useState('');
+  const [handle, setHandle] = useState('');
+  const [whats, setWhats] = useState('');
   const [newChannel, setNewChannel] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -25,13 +27,15 @@ export default function ConfiguracoesPage() {
     setName(tenant.name);
     setMStart(tenant.milestonesStart ?? '');
     setMList((tenant.milestones ?? []).map((v) => fmtBRL(v).replace('R$', '').trim()).join('; '));
+    setHandle(tenant.infinitePayHandle ?? '');
+    setWhats(tenant.whatsapp ?? '');
   }, [tenant]);
 
   if (profile?.role !== 'owner' || !tenant) return <p className="text-sm text-mute">Só o(a) dono(a) altera as configurações.</p>;
 
   async function saveTenant() {
     const milestones = mList.split(';').map((s) => parseMoney(s.trim())).filter((v) => v > 0).sort((a, b) => a - b);
-    await updateDoc(doc(db, 'tenants', tenant!.id), { name: name.trim() || tenant!.name, milestonesStart: mStart, milestones });
+    await updateDoc(doc(db, 'tenants', tenant!.id), { name: name.trim() || tenant!.name, milestonesStart: mStart, milestones, infinitePayHandle: handle.replace(/^\$/, '').trim(), whatsapp: whats.replace(/\D/g, '') });
     setMsg('Configurações salvas.');
   }
 
@@ -46,13 +50,15 @@ export default function ConfiguracoesPage() {
 
   return (
     <div className="max-w-3xl">
-      <PageHeader title="Configurações" subtitle="Dados da consultoria, canais de venda e conquistas." />
+      <PageHeader title="Configurações" subtitle="Dados da consultoria, checkout, canais de venda e conquistas." />
       <div className="space-y-4">
         <Card title="Consultoria">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Nome da consultoria" className="sm:col-span-2"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
             <Field label="Conquistas: contar faturamento a partir de"><input className="input" type="date" value={mStart} onChange={(e) => setMStart(e.target.value)} /></Field>
             <Field label="Marcos de faturamento (R$, separados por ;)" hint="Ex.: 50.000; 100.000; 500.000; 1.000.000"><input className="input" value={mList} onChange={(e) => setMList(e.target.value)} /></Field>
+            <Field label="InfiniteTag da InfinitePay" hint="Seu usuário no app InfinitePay, sem o $. Usado no checkout."><input className="input" placeholder="ex.: metodogarimpo" value={handle} onChange={(e) => setHandle(e.target.value)} /></Field>
+            <Field label="WhatsApp da consultoria" hint="Aparece no botão da página de obrigado do checkout."><input className="input" placeholder="(81) 99999-9999" value={whats} onChange={(e) => setWhats(e.target.value)} /></Field>
           </div>
           <div className="mt-4 flex items-center gap-3"><Button onClick={saveTenant}>Salvar</Button>{msg && <span className="text-sm text-good">{msg}</span>}</div>
         </Card>
