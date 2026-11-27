@@ -203,8 +203,10 @@ export function planImport(p: ImportPayload, ex: Existing, opts: { productId: st
     }
     if (exist) {
       out.skipped.leads++;
-      const tags = [...new Set([...(exist.tags ?? []), ...(l.tags ?? []), ...(l.list && l.list !== exist.list ? [l.list] : [])])];
       const data: Partial<Lead> = {};
+      const generic = !exist.list || /sem etiqueta|sem lista/i.test(exist.list);
+      if (generic && l.list) data.list = l.list;
+      const tags = [...new Set([...(exist.tags ?? []), ...(l.tags ?? []), ...(l.list && l.list !== exist.list && !data.list ? [l.list] : [])])];
       if (tags.length !== (exist.tags ?? []).length) data.tags = tags;
       if (client && !exist.clientId && exist.stage !== 'convertido') { data.clientId = client.id; data.stage = 'convertido'; }
       if (!hasLetters(exist.name) && hasLetters(l.name)) data.name = l.name.trim();

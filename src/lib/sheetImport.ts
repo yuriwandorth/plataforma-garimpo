@@ -45,6 +45,11 @@ export const FIELDS: Record<SheetKind, FieldDef[]> = {
   ],
 };
 
+/** Nome de lista sugerido pelo nome do arquivo (ex.: waspeed_aba_Leads_frios.xlsx → Leads frios) */
+export function listFromFileName(f: string): string {
+  return f.replace(/\.[^.]+$/, '').replace(/^[a-f0-9]{6,}-/i, '').replace(/^(waspeed|wascript)[_ -]*(aba|funil|lista)?[_ -]*/i, '').replace(/[_]+/g, ' ').trim();
+}
+
 export const norm = (s: unknown) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 /** Lê CSV (vírgula ou ponto e vírgula, aspas, quebras de linha dentro de aspas) */
@@ -138,7 +143,7 @@ export interface SheetResult { payload: ImportPayload; rowErrors: string[]; rows
  * Clientes: cada linha é uma cliente; se tiver plano + valor + data, vira também uma venda.
  * A mesma cliente pode aparecer em várias linhas (uma por venda).
  */
-export function sheetToPayload(rows: Cell[][], headerIdx: number, map: Record<string, number>, kind: SheetKind, channels: { id: string; name: string }[], source = 'planilha'): SheetResult {
+export function sheetToPayload(rows: Cell[][], headerIdx: number, map: Record<string, number>, kind: SheetKind, channels: { id: string; name: string }[], source = 'planilha', defaultList?: string): SheetResult {
   const get = (r: Cell[], f: string) => (map[f] === undefined ? undefined : r[map[f]]);
   const str = (r: Cell[], f: string) => { const v = get(r, f); return v === undefined || v === null ? '' : v instanceof Date ? toISODate(v) : String(v).trim(); };
   const errors: string[] = [];
@@ -164,7 +169,7 @@ export function sheetToPayload(rows: Cell[][], headerIdx: number, map: Record<st
       const email = str(r, 'email').toLowerCase();
       if (!phone && !email) { if (r.some((c) => String(c ?? '').trim())) errors.push(`Linha ${headerIdx + i + 2}: sem telefone`); return; }
       const tags = str(r, 'tags').split(/[,;|]/).map((t) => t.trim()).filter(Boolean);
-      leads.push({ key: phone || email, name: str(r, 'name'), phone: phone || undefined, email: email || undefined, list: str(r, 'list') || undefined,
+      leads.push({ key: phone || email, name: str(r, 'name'), phone: phone || undefined, email: email || undefined, list: str(r, 'list') || defaultList?.trim() || undefined,
         originStage: str(r, 'stage') || undefined, tags: tags.length ? tags : undefined, firstSeenAt: toISODate(get(r, 'date')) || undefined, notes: str(r, 'notes') || undefined });
     });
     return { payload: { source, leads }, rowErrors: errors, rows: leads.length };

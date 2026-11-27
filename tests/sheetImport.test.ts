@@ -62,3 +62,18 @@ describe('planilha', () => {
     expect(r.rowErrors).toHaveLength(1);
   });
 });
+
+import { listFromFileName } from '../src/lib/sheetImport';
+describe('lista pelo nome do arquivo', () => {
+  it('waspeed', () => {
+    expect(listFromFileName('waspeed_aba_Leads_frios.xlsx')).toBe('Leads frios');
+    expect(listFromFileName('a7bb0b99-waspeed_aba_Ex-Alunos.xlsx')).toBe('Ex-Alunos');
+    expect(listFromFileName('contatos junho.csv')).toBe('contatos junho');
+  });
+  it('lista padrão nas linhas sem coluna de lista', () => {
+    const rows = [['WhatsApp', 'Name'], ['558195707014', '+55 81 95707-014'], ['556792622203', 'Ana Costa Garimpeira']];
+    const r = sheetToPayload(rows, 0, autoMap(rows[0], 'leads'), 'leads', [], 'planilha', 'Leads frios');
+    expect(r.payload.leads).toHaveLength(2);
+    expect(r.payload.leads![1]).toMatchObject({ name: 'Ana Costa Garimpeira', phone: '556792622203', list: 'Leads frios' });
+  });
+});

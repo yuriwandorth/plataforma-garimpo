@@ -86,4 +86,14 @@ describe('leads', () => {
     expect(r.leadUpdates).toEqual([{ id: 'L1', data: { clientId: 'k', stage: 'convertido', name: 'Kellen Freitas Garimpeira' } }]);
     expect(r.leads[0].clientId).toBeUndefined();
   });
+
+  it('lead sem etiqueta ganha a aba como lista; com lista, ganha como etiqueta', () => {
+    let n = 0;
+    const r = planImport({ source: 'planilha', leads: [{ key: '1', name: '', phone: '81911112222', list: 'Leads frios' }, { key: '2', name: '', phone: '81922223333', list: 'Leads frios' }] },
+      { clients: [], plans: [], influencers: [], sales: [], leads: [
+        { id: 'A', name: 'A', phone: '81911112222', list: 'WhatsApp (sem etiqueta)', stage: 'novo' },
+        { id: 'B', name: 'B', phone: '81922223333', list: 'Lead frio', stage: 'novo' },
+      ] }, { productId: 'p', today: '2026-11-27', by: 'u', newId: () => `id${++n}` });
+    expect(r.leadUpdates).toEqual([{ id: 'A', data: { list: 'Leads frios' } }, { id: 'B', data: { tags: ['Leads frios'] } }]);
+  });
 });

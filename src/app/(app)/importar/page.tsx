@@ -11,7 +11,7 @@ import { useChannels, useClients, useInfluencers, usePlans, useProducts } from '
 import { fmtBRL2, fmtDate, todayISO } from '@/lib/calc';
 import { planImport, type ImportPayload, type ImportPlan } from '@/lib/importer';
 import type { Lead } from '@/lib/leads';
-import { autoMap, FIELDS, headerRowIndex, parseCSV, sheetToPayload, type Cell, type SheetKind } from '@/lib/sheetImport';
+import { autoMap, FIELDS, headerRowIndex, listFromFileName, parseCSV, sheetToPayload, type Cell, type SheetKind } from '@/lib/sheetImport';
 import type { Sale } from '@/lib/types';
 import { Badge, Button, Card, ErrorNote, Field, PageHeader, Stat } from '@/components/ui';
 
@@ -37,6 +37,7 @@ export default function ImportarPage() {
   const [map, setMap] = useState<Record<string, number>>({});
   const [rowErrors, setRowErrors] = useState<string[]>([]);
   const [raw, setRaw] = useState('');
+  const [listAll, setListAll] = useState('');
   const [productId, setProductId] = useState('');
   const [payload, setPayload] = useState<ImportPayload | null>(null);
   const [plan, setPlan] = useState<ImportPlan | null>(null);
@@ -63,6 +64,7 @@ export default function ImportarPage() {
     setErr(''); setPlan(null); setPayload(null); setDone(''); setSheets([]); setRowErrors([]);
     if (!f) return;
     setFileName(f.name);
+    setListAll(listFromFileName(f.name));
     try {
       if (/\.csv$|\.txt$/i.test(f.name)) {
         setSheets([{ name: f.name, rows: parseCSV(await f.text()) }]);
@@ -93,7 +95,7 @@ export default function ImportarPage() {
     setErr(''); setDone('');
     const missing = FIELDS[kind].filter((f) => f.required && map[f.id] === undefined);
     if (missing.length) return setErr(`Escolha a coluna de: ${missing.map((f) => f.label).join(', ')}.`);
-    const r = sheetToPayload(sheet.rows, headerIdx, map, kind, channels.data, `planilha:${fileName}`);
+    const r = sheetToPayload(sheet.rows, headerIdx, map, kind, channels.data, `planilha:${fileName}`, kind === 'leads' && map.list === undefined ? listAll : undefined);
     setRowErrors(r.rowErrors);
     if (!r.rows) return setErr('Nenhuma linha com dados foi encontrada abaixo do cabeçalho.');
     prepare(r.payload);
@@ -170,6 +172,11 @@ export default function ImportarPage() {
                 <select className="input" value={sheetIdx} onChange={(e) => setSheetIdx(Number(e.target.value))}>
                   {sheets.map((s, i) => <option key={s.name + i} value={i}>{s.name} ({s.rows.length} linhas)</option>)}
                 </select>
+              </Field>
+            )}
+            {kind === 'leads' && (
+              <Field label="Lista para todos os contatos do arquivo" hint="Usada quando a planilha não tem coluna de lista. Quem já é lead ganha essa lista como etiqueta.">
+                <input className="input" value={listAll} onChange={(e) => { setListAll(e.target.value); setPlan(null); }} placeholder="ex.: Leads frios" />
               </Field>
             )}
             {kind === 'clientes' && (
