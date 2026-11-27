@@ -12,6 +12,7 @@ const NAV: { group: string; items: { href: string; label: string; owner?: boolea
   { group: 'Clientes', items: [
     { href: '/clientes/', label: 'Central de clientes' },
     { href: '/renovacoes/', label: 'Renovações' },
+    { href: '/recall/', label: 'Recall de ex-alunas' },
     { href: '/cobrancas/', label: 'Cobranças' },
   ] },
   { group: 'Comercial', items: [

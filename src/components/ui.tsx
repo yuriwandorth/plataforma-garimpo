@@ -79,7 +79,7 @@ const TONES = {
   mute: 'bg-line/60 text-mute',
 };
 export function Badge({ tone = 'mute', children }: { tone?: keyof typeof TONES; children: ReactNode }) {
-  return <span className={cx('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', TONES[tone])}>{children}</span>;
+  return <span className={cx('inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium', TONES[tone])}>{children}</span>;
 }
 
 export function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: 'good' | 'bad' }) {

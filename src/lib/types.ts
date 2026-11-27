@@ -81,6 +81,10 @@ export interface Client {
   period?: Period;
   /** Último contato sobre renovação (YYYY-MM-DD) */
   renewalContactAt?: string;
+  /** Destino do vencimento atual: em negociação, pausa ou não renovou */
+  outcome?: import('./retention').RenewalOutcome;
+  /** Recall (winning back) de ex-aluna */
+  recall?: import('./retention').Recall;
   deleted?: boolean;
   deletedAt?: number;
   createdAt: number;

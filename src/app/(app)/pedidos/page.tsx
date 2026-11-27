@@ -98,7 +98,7 @@ export default function PedidosPage() {
       if (!client?.endDate || sale.endDate >= client.endDate) {
         await w.update<Client>('clients', clientId, {
           planId: sale.planId, planName: sale.planName, startDate: sale.startDate, endDate: sale.endDate, lastValue: sale.gross,
-          period: sale.period, status: 'ativo', phone: client?.phone || o.phone, cpf: client?.cpf || o.cpf,
+          period: sale.period, status: 'ativo', phone: client?.phone || o.phone, cpf: client?.cpf || o.cpf, recall: undefined,
         }, `Plano atualizado pelo checkout: ${sale.planName}`);
       }
       await w.update<Order>('orders', o.id, { status: 'concluido', clientId, saleId }, `Pedido concluído: ${o.name}`);

@@ -4,10 +4,11 @@ import { useSalesSince } from '@/lib/db';
 import { useChannels, useClients, useMembers } from '@/lib/hooks';
 import {
   addMonths, channelKind, delta, fmtBRL, fmtPct, groupRevenue, isActiveClient, iso, MONTHS, MONTHS_SHORT,
-  monthlySeries, mrr, newClientsInMonth, parts, prevMonth, renewalMonth, salesInMonth, todayISO, totals, upgradeStats, weeklyCompare,
+  monthlySeries, mrr, newClientsInMonth, parts, prevMonth, salesInMonth, todayISO, totals, upgradeStats, weeklyCompare,
 } from '@/lib/calc';
 import { Badge, Card, ErrorNote, PageHeader, Progress, Spinner, Stat } from '@/components/ui';
 import { MonthPicker } from '@/components/MonthPicker';
+import { renewalBoard, type RClient } from '@/lib/retention';
 import { BarChart } from '@/components/BarChart';
 
 function cmp(curr: number, prev: number, money = true) {
@@ -60,7 +61,7 @@ export default function DesempenhoPage() {
   }, [ativos]);
   const bySeller = groupRevenue(monthSales, (s) => s.sellerId ?? '');
   const rec = mrr(clients.data, today);
-  const ren = renewalMonth(clients.data, sales.data, ym.y, ym.m, today);
+  const ren = renewalBoard(clients.data as RClient[], sales.data, ym.y, ym.m, today);
   const ups = useMemo(() => upgradeStats(sales.data), [sales.data]);
 
   const sNet = cmp(cur.net, prev.net), sCount = cmp(cur.count, prev.count, false), sTicket = cmp(cur.netTicket, prev.netTicket), sNew = cmp(novos, novosPrev, false);
@@ -133,8 +134,8 @@ export default function DesempenhoPage() {
             <Card title="Renovações e receita recorrente">
               <div className="grid gap-3 sm:grid-cols-3">
                 <div><div className="text-xs uppercase text-mute">MRR estimado</div><div className="text-lg font-semibold">{fmtBRL(rec.value)}</div><div className="text-xs text-mute">{rec.count} clientes · valor mensal pelo período do plano</div></div>
-                <div><div className="text-xs uppercase text-mute">A renovar no mês</div><div className="text-lg font-semibold">{ren.toRenew.length}</div><div className="text-xs text-mute">exposição {fmtBRL(ren.estimatedRevenue)} · {ren.overdue} vencido(s)</div></div>
-                <div><div className="text-xs uppercase text-mute">Renovadas</div><div className="text-lg font-semibold">{fmtBRL(ren.renewedValue)}</div><div className="text-xs text-mute">{ren.renewed.length} renovação(ões) · taxa {fmtPct(ren.rate)}</div></div>
+                <div><div className="text-xs uppercase text-mute">A renovar no mês</div><div className="text-lg font-semibold">{ren.aVencer.length + ren.semDecisao.length + ren.negociando.length}</div><div className="text-xs text-mute">em jogo {fmtBRL(ren.receitaEmAberto)} · {ren.perdidas.length} não renovaram ({fmtPct(ren.taxaPerda)})</div></div>
+                <div><div className="text-xs uppercase text-mute">Renovadas</div><div className="text-lg font-semibold">{fmtBRL(ren.renovadasValor)}</div><div className="text-xs text-mute">{ren.renovadas.length} renovação(ões) · taxa {fmtPct(ren.taxaRenovacao)}</div></div>
               </div>
             </Card>
           </div>

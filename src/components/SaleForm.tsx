@@ -19,9 +19,11 @@ interface Props {
   clientSales?: Sale[];
   /** Tipo sugerido ao abrir (ex.: Marcar renovado, Trocar de plano) */
   initialKind?: SaleKind;
+  /** Canal sugerido ao abrir (ex.: winning-back quando a ex-aluna volta) */
+  initialChannelId?: string;
 }
 
-export function SaleForm({ open, onClose, client, sale, clientSales, initialKind }: Props) {
+export function SaleForm({ open, onClose, client, sale, clientSales, initialKind, initialChannelId }: Props) {
   const { user } = useSession();
   const w = useWriter();
   const clients = useClients();
@@ -82,6 +84,7 @@ export function SaleForm({ open, onClose, client, sale, clientSales, initialKind
         if (client?.endDate) setStartDate(addDays(client.endDate, 1));
       }
       if (k !== 'nova' && client?.planId) setPlanId('');
+      if (initialChannelId) setChannelId(initialChannelId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sale?.id, client?.id]);
@@ -142,6 +145,7 @@ export function SaleForm({ open, onClose, client, sale, clientSales, initialKind
           sellerId: selectedClient.sellerId || sellerId || undefined,
           referredById: selectedClient.referredById || referredById || undefined,
           influencerId: selectedClient.influencerId || influencerId || undefined,
+          recall: undefined,
         }, `Plano atualizado pela venda: ${plan.name}`);
       }
       onClose();
