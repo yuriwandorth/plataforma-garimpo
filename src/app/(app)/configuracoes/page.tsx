@@ -63,6 +63,11 @@ export default function ConfiguracoesPage() {
           <div className="mt-4 flex items-center gap-3"><Button onClick={saveTenant}>Salvar</Button>{msg && <span className="text-sm text-good">{msg}</span>}</div>
         </Card>
 
+        <Card title="Importar dados">
+          <p className="text-sm text-mute">Traz clientes, histórico de vendas e influencers de outra plataforma (ex.: Kairós), sem duplicar o que já existe.</p>
+          <a href={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/importar/`} className="mt-3 inline-flex rounded-lg border border-line px-3.5 py-2 text-sm hover:border-gold/60">Abrir importação</a>
+        </Card>
+
         <Card title="Canais de venda">
           <p className="mb-3 text-sm text-mute">Desativar um canal tira ele das metas e da escolha em novas vendas; o histórico continua. Clique no tipo para alternar entre hunter (traz cliente nova) e farmer (retém quem já é cliente).</p>
           <ul className="mb-3 divide-y divide-line">
