@@ -83,6 +83,8 @@ describe('ascensão e MRR', () => {
       client({ lastValue: 900, period: 'trimestral', endDate: '2027-01-01' }),
     ], '2026-11-27');
     expect(r).toEqual({ value: 500, count: 2 });
+    // sem período: semestral deduzido pelas datas
+    expect(mrr([client({ lastValue: 1200, startDate: '2026-06-01', endDate: '2026-11-30' })], '2026-11-27').value).toBe(200);
   });
   it('semana vs mês anterior e maior queda', () => {
     const w = weeklyCompare([

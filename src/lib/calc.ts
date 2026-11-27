@@ -445,7 +445,10 @@ export function upgradeStats(sales: Sale[]) {
 export function mrr(clients: Client[], today: string): { value: number; count: number } {
   const act = clients.filter((c) => isActiveClient(c, today) && c.lastValue);
   const months = { mensal: 1, trimestral: 3, semestral: 6, anual: 12 } as const;
-  return { value: act.reduce((a, c) => a + c.lastValue! / months[c.period ?? 'mensal'], 0), count: act.length };
+  // sem período gravado (clientes antigas): deduz pelos meses entre início e vencimento
+  const monthsOf = (c: Client) => c.period ? months[c.period]
+    : c.startDate && c.endDate ? Math.max(1, Math.round((daysBetween(c.startDate, c.endDate) + 1) / 30.4)) : 1;
+  return { value: act.reduce((a, c) => a + c.lastValue! / monthsOf(c), 0), count: act.length };
 }
 
 /** Comparação por semana com o mês anterior + canal com maior queda em cada semana */
