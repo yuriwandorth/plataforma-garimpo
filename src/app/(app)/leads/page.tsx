@@ -2,15 +2,15 @@
 // Leads: quem ainda não comprou. Cruza com as alunas pelo telefone e mostra a conversão por lista.
 import { useMemo, useState } from 'react';
 import { useCollection, useWriter } from '@/lib/db';
-import { download, useChannels, useClients } from '@/lib/hooks';
+import { download, useChannels, useClients, useInfluencers } from '@/lib/hooks';
 import { fmtDate, fmtPct, toCSV, todayISO } from '@/lib/calc';
-import { isConverted, LEAD_STAGES, leadBoard, type Lead, type LeadStage, type LeadView } from '@/lib/leads';
+import { FUP_LABEL, isConverted, LEAD_STAGES, leadBoard, nextFollowUp, type Lead, type LeadStage, type LeadView } from '@/lib/leads';
 import type { Client, Sale } from '@/lib/types';
 import { Badge, Button, Card, Empty, ErrorNote, Field, Modal, PageHeader, Progress, Spinner, Stat, Tabs } from '@/components/ui';
 import { SaleForm } from '@/components/SaleForm';
 import { ClientModal } from '@/components/ClientModal';
 
-type Tab = 'abertos' | 'convertidos' | 'perdidos' | 'todos';
+type Tab = 'chamar' | 'abertos' | 'convertidos' | 'perdidos' | 'todos';
 const PAGE = 100;
 
 const wa = (phone?: string) => {
@@ -31,7 +31,8 @@ export default function LeadsPage() {
   const sales = useCollection<Sale>('sales');
   const channels = useChannels();
   const w = useWriter();
-  const [tab, setTab] = useState<Tab>('abertos');
+  const [tab, setTab] = useState<Tab>('chamar');
+  const today = todayISO();
   const [q, setQ] = useState('');
   const [list, setList] = useState('');
   const [limit, setLimit] = useState(PAGE);
@@ -43,11 +44,19 @@ export default function LeadsPage() {
   const b = useMemo(() => leadBoard(leads.data, clients.data, sales.data), [leads.data, clients.data, sales.data]);
   const s = q.trim().toLowerCase();
   const digits = s.replace(/\D/g, '');
-  const filtered = b.views
-    .filter((v) => tab === 'todos' || (tab === 'convertidos' ? isConverted(v) : tab === 'perdidos' ? !isConverted(v) && v.lead.stage === 'perdido' : !isConverted(v) && v.lead.stage !== 'perdido'))
+  const fup = (v: LeadView) => (isConverted(v) ? null : nextFollowUp(v.lead, today));
+  const due = b.views.filter((v) => { const f = fup(v); return f?.at && f.at <= today; });
+  const filtered = (tab === 'chamar' ? due : b.views)
+    .filter((v) => tab === 'chamar' || tab === 'todos' || (tab === 'convertidos' ? isConverted(v) : tab === 'perdidos' ? !isConverted(v) && v.lead.stage === 'perdido' : !isConverted(v) && v.lead.stage !== 'perdido'))
     .filter((v) => !list || (v.lead.list ?? 'Sem lista') === list || (v.lead.tags ?? []).includes(list))
     .filter((v) => !s || v.lead.name.toLowerCase().includes(s) || (v.lead.email ?? '').includes(s) || (digits.length >= 4 && (v.lead.phone ?? '').includes(digits)))
-    .sort((a, b2) => (b2.lead.firstSeenAt ?? '').localeCompare(a.lead.firstSeenAt ?? '') || a.lead.name.localeCompare(b2.lead.name));
+    .sort((a, b2) => tab === 'chamar'
+      ? (fup(a)?.kind === 'responder' ? -1 : 0) - (fup(b2)?.kind === 'responder' ? -1 : 0) || (b2.lead.lastContactAt ?? '').localeCompare(a.lead.lastContactAt ?? '')
+      : (b2.lead.lastContactAt ?? b2.lead.firstSeenAt ?? '').localeCompare(a.lead.lastContactAt ?? a.lead.firstSeenAt ?? '') || a.lead.name.localeCompare(b2.lead.name));
+  const notLeads = leads.data.filter((l) => !l.deleted && l.stage === 'nao_lead').length;
+  async function contacted(l: Lead) {
+    await w.update<Lead>('leads', l.id, { lastContactAt: today, lastFromMe: true, followUpAt: undefined, stage: l.stage === 'novo' ? 'em_contato' : l.stage }, `Contato com lead: ${l.name}`);
+  }
   const lists = [...new Set(b.views.flatMap((v) => [v.lead.list ?? 'Sem lista', ...(v.lead.tags ?? [])]))].sort();
 
   async function becomeClient(v: LeadView) {
@@ -75,6 +84,7 @@ export default function LeadsPage() {
       <PageHeader title="Leads" subtitle="Quem já falou com você e ainda não comprou. Quem vira aluna é reconhecida pelo telefone."
         actions={<><Button variant="outline" onClick={exportCSV} disabled={!filtered.length}>Exportar CSV</Button>
           <a href={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/importar/`} className="inline-flex h-9 items-center rounded-lg border border-line px-3 text-sm hover:border-gold/60">Importar</a>
+          <a href={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/leads/triagem/`} className="inline-flex h-9 items-center rounded-lg border border-gold/60 bg-gold/10 px-3 text-sm font-medium hover:bg-gold/20">Triagem</a>
           <Button onClick={() => setEdit('new')}>Novo lead</Button></>} />
       <ErrorNote error={leads.error || err} />
 
@@ -100,6 +110,7 @@ export default function LeadsPage() {
       )}
 
       <Tabs value={tab} onChange={(t) => { setTab(t); setLimit(PAGE); }} items={[
+        { id: 'chamar', label: `Para chamar hoje (${due.length})` },
         { id: 'abertos', label: `Em aberto (${b.open})` },
         { id: 'convertidos', label: `Viraram alunas (${b.converted})` },
         { id: 'perdidos', label: `Perdidos (${b.lost})` },
@@ -113,12 +124,13 @@ export default function LeadsPage() {
         </select>
       </div>
 
+      {notLeads > 0 && <p className="mb-2 text-xs text-mute">{notLeads} contato(s) marcados como "não é lead" ficam fora das contas. Para rever, abra a Triagem.</p>}
       {leads.loading || clients.loading ? <Spinner /> : filtered.length === 0 ? (
         <Empty title={b.total ? 'Nenhum lead neste filtro' : 'Nenhum lead ainda'} text={b.total ? undefined : 'Importe uma planilha de contatos (ex.: exportação do Waspeed) ou adicione à mão.'} />
       ) : (
         <div className="card overflow-x-auto">
           <table className="w-full">
-            <thead><tr className="border-b border-line"><th className="th">Lead</th><th className="th">Lista / etapa</th><th className="th">Entrou em</th><th className="th">Situação</th><th className="th" /></tr></thead>
+            <thead><tr className="border-b border-line"><th className="th">Lead</th><th className="th">Lista / etapa</th><th className="th">Último contato</th><th className="th">Situação</th><th className="th">Próximo contato</th><th className="th" /></tr></thead>
             <tbody>
               {filtered.slice(0, limit).map((v) => {
                 const l = v.lead;
@@ -128,13 +140,15 @@ export default function LeadsPage() {
                   <tr key={l.id} className="border-b border-line/60">
                     <td className="td"><button className="text-left font-medium hover:underline" onClick={() => setEdit(l)}>{l.name || fmtPhone(l.phone)}</button><div className="text-xs text-mute">{fmtPhone(l.phone)}{l.email ? ` · ${l.email}` : ''}</div></td>
                     <td className="td text-sm">{l.list ?? <span className="text-mute">—</span>}{l.originStage && <div className="text-xs text-mute">{l.originStage}</div>}{(l.tags ?? []).length > 0 && <div className="mt-0.5 flex flex-wrap gap-1">{l.tags!.slice(0, 3).map((t) => <Badge key={t}>{t}</Badge>)}</div>}</td>
-                    <td className="td text-sm">{l.firstSeenAt ? fmtDate(l.firstSeenAt) : '—'}</td>
+                    <td className="td text-sm">{l.lastContactAt ? fmtDate(l.lastContactAt) : l.firstSeenAt ? fmtDate(l.firstSeenAt) : '—'}{l.lastFromMe !== undefined && <div className="text-xs text-mute">{l.lastFromMe ? 'você falou por último' : 'ela falou por último'}</div>}</td>
                     <td className="td">
                       <Badge tone={LEAD_STAGES[conv ? 'convertido' : l.stage].tone}>{LEAD_STAGES[conv ? 'convertido' : l.stage].label}</Badge>
                       {v.client && <div><button className="text-xs text-gold hover:underline" onClick={() => setOpenClient(clients.byId[v.client!.id] ?? null)}>{v.client.name}{v.firstSaleAt ? ` · comprou ${fmtDate(v.firstSaleAt)}` : ''}</button></div>}
                     </td>
+                    <td className="td text-sm">{(() => { const f = fup(v); if (!f) return <span className="text-mute">—</span>; return <>{f.at ? <span className={f.at <= today ? 'font-medium text-bad' : ''}>{f.at <= today ? 'Hoje' : fmtDate(f.at)}</span> : <span className="text-mute">sem data</span>}<div className="text-xs text-mute">{FUP_LABEL[f.kind]}</div></>; })()}</td>
                     <td className="td"><div className="flex flex-wrap justify-end gap-2">
                       {link && <a href={link} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-lg border border-line px-2.5 py-1.5 text-xs hover:border-gold/60">WhatsApp</a>}
+                      {!conv && <Button size="sm" variant="outline" onClick={() => contacted(l)}>Chamei</Button>}
                       {!conv && <Button size="sm" onClick={() => becomeClient(v)}>Lançar venda</Button>}
                     </div></td>
                   </tr>
@@ -155,6 +169,7 @@ export default function LeadsPage() {
 
 function LeadModal({ lead, channels, onClose }: { lead?: Lead; channels: { id: string; name: string }[]; onClose: () => void }) {
   const w = useWriter();
+  const influencers = useInfluencers();
   const [f, setF] = useState<Partial<Lead>>(lead ?? { stage: 'novo', source: 'manual', firstSeenAt: todayISO() });
   const [err, setErr] = useState('');
   const set = <K extends keyof Lead>(k: K, v: Lead[K]) => setF((p) => ({ ...p, [k]: v }));
@@ -188,6 +203,13 @@ function LeadModal({ lead, channels, onClose }: { lead?: Lead; channels: { id: s
             {channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </Field>
+        <Field label="Influencer que trouxe" hint="Conta como lead no painel dela.">
+          <select className="input" value={f.influencerId ?? ''} onChange={(e) => { set('influencerId', e.target.value || undefined); if (e.target.value && !f.channelId) set('channelId', 'influencer'); }}>
+            <option value="">—</option>
+            {influencers.data.map((i) => <option key={i.id} value={i.id}>{i.name} (@{i.handle})</option>)}
+          </select>
+        </Field>
+        <Field label="Próximo follow-up" hint="Deixe vazio para a plataforma sugerir pela conversa."><input type="date" className="input" value={f.followUpAt ?? ''} onChange={(e) => set('followUpAt', e.target.value || undefined)} /></Field>
         <Field label="Entrou em"><input type="date" className="input" value={f.firstSeenAt ?? ''} onChange={(e) => set('firstSeenAt', e.target.value)} /></Field>
         {f.stage === 'perdido' && <Field label="Motivo da perda"><input className="input" value={f.lostReason ?? ''} onChange={(e) => set('lostReason', e.target.value)} /></Field>}
         <Field label="Observação" className="sm:col-span-2"><textarea className="input min-h-[70px]" value={f.notes ?? ''} onChange={(e) => set('notes', e.target.value)} /></Field>

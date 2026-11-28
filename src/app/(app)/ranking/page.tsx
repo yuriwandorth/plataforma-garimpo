@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useCollection, useWriter } from '@/lib/db';
 import { fmtDate, todayISO } from '@/lib/calc';
 import { areaAverage, AREAS, overallAverage, rankLevel, SCORE_LABEL, type Assessment } from '@/lib/growth';
+import { HowTo } from '@/components/HowTo';
 import { Badge, Button, Card, cx, Empty, Field, Modal, PageHeader, Progress, Spinner } from '@/components/ui';
 
 const LEVEL_TONE = { Bronze: 'warn', Prata: 'mute', Ouro: 'gold', Diamante: 'good' } as const;
@@ -19,6 +20,17 @@ export default function RankingPage() {
     <div>
       <PageHeader title="Ranking do negócio" subtitle="Maturidade da consultoria em 5 áreas, de 1 (inexistente) a 4 (otimizado). Refaça a cada 15 dias e acompanhe a evolução."
         actions={<Button onClick={() => setForm('new')}>Nova avaliação</Button>} />
+      <HowTo id="ranking" title="Como usar o Ranking do negócio">
+        <p><b>Para que serve:</b> é um raio-x da maturidade da consultoria em 5 áreas (Marketing, Vendas, Entrega, Gestão e Pessoas e processos). Ele mostra onde o negócio está fraco antes que isso vire queda de vendas ou de renovação, e diz onde colocar energia agora.</p>
+        <p><b>Como fazer (5 minutos):</b></p>
+        <ul>
+          <li>Clique em "Nova avaliação" e dê uma nota de 1 a 4 para cada pilar: <b>1</b> não existe, <b>2</b> existe mas improvisado, <b>3</b> funciona com rotina, <b>4</b> funciona, é medido e melhora sozinho.</li>
+          <li>Seja honesto: nota alta sem processo escrito ou sem número acompanhado ainda é 2.</li>
+          <li>A média das áreas define o nível: Bronze (abaixo de 2), Prata (2), Ouro (3) e Diamante (3,5 ou mais).</li>
+        </ul>
+        <p><b>Quando fazer:</b> a cada 15 dias, de preferência no mesmo dia da semana. Faça também logo depois de uma mudança grande (time novo, lançamento, troca de sistema).</p>
+        <p><b>O que fazer com o resultado:</b> pegue os 2 ou 3 pilares com nota mais baixa da área mais fraca e transforme em resultado-chave no OKR ou em tarefa em Atividades. Na avaliação seguinte, veja se a nota subiu.</p>
+      </HowTo>
       {list.loading ? <Spinner /> : !last ? (
         <Empty title="Nenhuma avaliação ainda" text="Leva uns 5 minutos: dê uma nota de 1 a 4 para cada pilar das 5 áreas." action={<Button onClick={() => setForm('new')}>Fazer a primeira avaliação</Button>} />
       ) : (

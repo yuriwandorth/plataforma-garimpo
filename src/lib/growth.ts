@@ -81,7 +81,25 @@ export type AmbassadorDeal = 'nenhuma' | 'meses' | 'comissao' | 'desconto';
 export const DEAL_LABEL: Record<AmbassadorDeal, string> = {
   nenhuma: 'Sem negociação', meses: 'Mais meses de plano', comissao: 'Comissão', desconto: 'Desconto de renovação',
 };
-export interface Ambassador { id: string; deal: AmbassadorDeal; value: number; approachedAt?: string; notes?: string }
+export type AmbassadorStatus = 'convidada' | 'ativa' | 'pausada' | 'recusou';
+export const AMB_STATUS: Record<AmbassadorStatus, { label: string; tone: 'gold' | 'good' | 'mute' | 'bad' }> = {
+  convidada: { label: 'Convidada', tone: 'gold' }, ativa: { label: 'Ativa', tone: 'good' }, pausada: { label: 'Pausada', tone: 'mute' }, recusou: { label: 'Recusou', tone: 'bad' },
+};
+/** id = id da aluna (clients) */
+export interface Ambassador {
+  id: string; deal: AmbassadorDeal; value: number; approachedAt?: string; notes?: string;
+  /** Cadastrada como embaixadora (mesmo antes da 1ª indicação) */
+  status?: AmbassadorStatus; invitedAt?: string; joinedAt?: string;
+  /** Benefícios combinados com ela */
+  benefits?: string[];
+  /** Cupom/código de indicação dela (opcional) */
+  code?: string;
+}
+export const AMBASSADOR_BENEFITS: { name: string; group: string }[] = [
+  { name: 'Desconto na renovação', group: 'Financeiro' }, { name: 'Mês grátis por indicação', group: 'Financeiro' }, { name: 'Comissão por indicação', group: 'Financeiro' }, { name: 'Cupom exclusivo para indicar', group: 'Financeiro' },
+  { name: 'Brinde do Garimpo', group: 'Reconhecimento' }, { name: 'Destaque na comunidade', group: 'Reconhecimento' }, { name: 'Selo de embaixadora', group: 'Reconhecimento' }, { name: 'Collab em conteúdo', group: 'Reconhecimento' },
+  { name: 'Call extra de acompanhamento', group: 'Acesso' }, { name: 'Acesso antecipado a novidades', group: 'Acesso' }, { name: 'Live exclusiva de embaixadoras', group: 'Acesso' }, { name: 'Prioridade no atendimento', group: 'Acesso' },
+];
 
 export interface AmbassadorRow { clientId: string; name: string; volume: number; revenue: number; ticket: number; prevVolume: number; rank: number; level: 'Ouro' | 'Prata' | 'Bronze' | null }
 

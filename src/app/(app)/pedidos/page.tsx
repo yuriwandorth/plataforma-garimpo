@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useSession } from '@/lib/auth';
 import { useCollection, useWriter } from '@/lib/db';
@@ -11,6 +11,8 @@ import {
   type CheckoutLink, type Coupon, type Order,
 } from '@/lib/checkout';
 import { syncInfluencerCoupon } from '@/lib/couponSync';
+import { phoneKey, type Lead } from '@/lib/leads';
+import { docRef } from '@/lib/db';
 import type { Client } from '@/lib/types';
 import { PERIOD_LABEL } from '@/lib/types';
 import { Badge, Button, Card, Empty, ErrorNote, Field, Modal, PageHeader, Spinner, Stat, Tabs, Toggle } from '@/components/ui';
@@ -30,6 +32,9 @@ export default function PedidosPage() {
   const links = useCollection<CheckoutLink>('checkouts');
   const orders = useCollection<Order>('orders');
   const coupons = useCollection<Coupon>('coupons');
+  const leads = useCollection<Lead>('leads');
+  const leadSynced = useRef(false);
+  const infs = useInfluencers();
   const [editCoupon, setEditCoupon] = useState<Coupon | 'new' | null>(null);
   const clients = useClients();
   const [tab, setTab] = useState<Tab>('conferir');
@@ -60,6 +65,39 @@ export default function PedidosPage() {
       setMsg('Não deu para falar com a InfinitePay agora. Tente de novo em instantes.');
     } finally { setBusy(''); }
   }
+
+  // Todo pedido vira lead (com a influencer do cupom ou do link), para rastrear quem não pagou e a origem
+  useEffect(() => {
+    if (leadSynced.current || orders.loading || leads.loading || coupons.loading || links.loading || infs.loading || !tenant) return;
+    leadSynced.current = true;
+    const byPhone = new Map(leads.data.filter((l) => !l.deleted).map((l) => [phoneKey(l.phone), l] as const));
+    const b = writeBatch(db);
+    let n = 0;
+    for (const o of orders.data) {
+      const ref = (o.ref ?? '').replace(/^@/, '').toLowerCase();
+      const infId = (o.couponCode && coupons.data.find((c) => c.id === o.couponCode)?.influencerId) || linkById[o.checkoutId]?.influencerId
+        || (ref ? infs.data.find((i) => (i.handle ?? '').toLowerCase() === ref || (i.coupon ?? '').toLowerCase() === ref)?.id : undefined);
+      const pk = phoneKey(o.phone);
+      const ex = pk ? byPhone.get(pk) : undefined;
+      const day = new Date(o.createdAt).toISOString().slice(0, 10);
+      if (ex) {
+        if (infId && !ex.influencerId) { b.set(docRef(tenant.id, 'leads', ex.id), { influencerId: infId, updatedAt: Date.now() }, { merge: true }); n++; }
+        continue;
+      }
+      const id = `checkout-${o.id}`;
+      if (leads.data.some((l) => l.id === id)) continue;
+      const lead: Omit<Lead, 'id'> = {
+        name: o.name, phone: o.phone, email: o.email, source: 'checkout', list: 'Checkout', stage: o.status === 'concluido' ? 'convertido' : 'novo',
+        firstSeenAt: day, lastContactAt: day, importKey: `checkout:${o.id}`, createdAt: Date.now(), updatedAt: Date.now(),
+        ...(infId ? { influencerId: infId, channelId: 'influencer' } : {}), ...(o.clientId ? { clientId: o.clientId } : {}),
+        notes: `Pedido no checkout: ${o.title}${o.couponCode ? ` · cupom ${o.couponCode}` : ''}`,
+      };
+      b.set(docRef(tenant.id, 'leads', id), lead);
+      byPhone.set(pk, { id, ...lead });
+      n++;
+    }
+    if (n) b.commit().catch((e) => console.error('leads do checkout', e));
+  }, [orders.loading, leads.loading, coupons.loading, links.loading, infs.loading, orders.data, leads.data, coupons.data, infs.data, linkById, tenant]);
 
   // Confere sozinho os pedidos que voltaram do pagamento
   useEffect(() => {
@@ -253,7 +291,7 @@ function LinkModal({ link, onClose }: { link?: CheckoutLink; onClose: () => void
     setBusy(true);
     try {
       const data: Omit<CheckoutLink, 'id' | 'createdAt' | 'updatedAt'> = {
-        title: title.trim(), description: description.trim() || undefined, brand: tenant?.name ?? '',
+        title: title.trim(), description: description.trim() || undefined, brand: tenant?.name ?? '', benefits: plan.benefits?.length ? plan.benefits : undefined, color: tenant?.brandColor,
         planId: plan.id, planName: plan.name, productId: plan.productId, period: plan.period, price: value,
         handle: h, terms: terms.trim(), channelId: channelId || undefined, influencerId: influencerId || undefined,
         whatsapp: onlyDigits(whatsapp) || undefined, active,

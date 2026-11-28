@@ -4,11 +4,12 @@ import type { Client, Sale } from './types';
 import { addDays, countable, daysBetween, monthBounds, saleKind } from './calc';
 
 export type ChurnReason =
-  | 'financeiro' | 'rotina' | 'resultado' | 'atendimento' | 'saude' | 'outro_profissional' | 'sozinha' | 'sem_resposta' | 'outro';
+  | 'financeiro' | 'inadimplencia' | 'rotina' | 'resultado' | 'atendimento' | 'saude' | 'outro_profissional' | 'sozinha' | 'sem_resposta' | 'outro';
 
 /** Motivo de saída + em quantos dias vale chamar de novo */
 export const CHURN_REASONS: Record<ChurnReason, { label: string; recallDays: number }> = {
   financeiro: { label: 'Financeiro', recallDays: 60 },
+  inadimplencia: { label: 'Parou de pagar as parcelas', recallDays: 45 },
   rotina: { label: 'Falta de tempo / rotina', recallDays: 45 },
   resultado: { label: 'Insatisfeita com o resultado', recallDays: 90 },
   atendimento: { label: 'Insatisfeita com o atendimento', recallDays: 120 },
@@ -52,7 +53,7 @@ export const GRACE_DAYS = 7;
 
 /** Decisão vale só para o ciclo atual */
 export function currentOutcome(c: RClient): RenewalOutcome | undefined {
-  return c.outcome && c.outcome.cycleEnd === c.endDate ? c.outcome : undefined;
+  return c.outcome && (c.outcome.cycleEnd === c.endDate || !c.endDate) ? c.outcome : undefined;
 }
 
 export interface BoardRow { client: RClient; daysLeft: number; outcome?: RenewalOutcome }
@@ -131,6 +132,7 @@ export function recallList(clients: RClient[], today: string): RecallRow[] {
 export function recallMessage(firstName: string, reason?: ChurnReason): string {
   const open = `Oi, ${firstName}! Tudo bem?`;
   switch (reason) {
+    case 'inadimplencia': return `${open} Lembrei de você aqui. Sei que a parte das parcelas apertou e tá tudo bem. Se quiser retomar, me chama que a gente acha um formato que caiba no seu momento.`;
     case 'financeiro': return `${open} Lembrei de você aqui. Se a parte financeira estiver mais tranquila agora e fizer sentido voltar, me chama que a gente vê o plano que cabe melhor pra você.`;
     case 'rotina': return `${open} Como tá a rotina por aí? Se quiser retomar os treinos, a gente monta algo que encaixe no tempo que você tem hoje, mesmo que seja pouco.`;
     case 'saude': return `${open} Passando pra saber como você tá. Quando estiver liberada pra voltar, me chama que a gente recomeça no seu ritmo.`;

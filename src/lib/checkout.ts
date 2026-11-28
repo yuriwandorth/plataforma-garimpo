@@ -12,6 +12,10 @@ export interface CheckoutLink {
   id: string;
   title: string;
   description?: string;
+  /** O que está incluso (copiado do plano) */
+  benefits?: string[];
+  /** Cor da marca para a página pública */
+  color?: string;
   brand: string;
   planId: string;
   planName: string;

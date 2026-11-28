@@ -24,7 +24,7 @@ export interface ImpSale {
   channelId?: string;
   notes?: string;
 }
-export interface ImpLead { key: string; name: string; phone?: string; email?: string; list?: string; originStage?: string; stage?: LeadStage; tags?: string[]; firstSeenAt?: string; lastContactAt?: string; notes?: string; channelId?: string }
+export interface ImpLead { key: string; name: string; phone?: string; email?: string; list?: string; originStage?: string; stage?: LeadStage; tags?: string[]; firstSeenAt?: string; lastContactAt?: string; lastFromMe?: boolean; notes?: string; channelId?: string }
 export interface ImportPayload { source: string; influencers?: ImpInfluencer[]; clients?: ImpClient[]; sales?: ImpSale[]; leads?: ImpLead[] }
 
 type WithId<T> = T & { id: string };
@@ -33,7 +33,7 @@ export interface Existing {
   plans: Pick<Plan, 'id' | 'name' | 'period' | 'productId'>[];
   influencers: Pick<Influencer, 'id' | 'name' | 'handle' | 'email'>[];
   sales: (Pick<Sale, 'id' | 'clientId' | 'date' | 'gross'> & { importKey?: string })[];
-  leads?: Pick<Lead, 'id' | 'name' | 'phone' | 'email' | 'list' | 'tags' | 'deleted' | 'stage' | 'clientId'>[];
+  leads?: Pick<Lead, 'id' | 'name' | 'phone' | 'email' | 'list' | 'tags' | 'deleted' | 'stage' | 'clientId' | 'lastContactAt'>[];
 }
 
 export interface ImportPlan {
@@ -210,6 +210,7 @@ export function planImport(p: ImportPayload, ex: Existing, opts: { productId: st
       if (tags.length !== (exist.tags ?? []).length) data.tags = tags;
       if (client && !exist.clientId && exist.stage !== 'convertido') { data.clientId = client.id; data.stage = 'convertido'; }
       if (!hasLetters(exist.name) && hasLetters(l.name)) data.name = l.name.trim();
+      if (l.lastContactAt && (!exist.lastContactAt || l.lastContactAt > exist.lastContactAt || (l.lastContactAt === exist.lastContactAt && l.lastFromMe !== undefined))) { data.lastContactAt = l.lastContactAt; if (l.lastFromMe !== undefined) data.lastFromMe = l.lastFromMe; }
       if (Object.keys(data).length) out.leadUpdates.push({ id: exist.id, data });
       continue;
     }
@@ -219,7 +220,7 @@ export function planImport(p: ImportPayload, ex: Existing, opts: { productId: st
       id, importKey: `${src}:${l.key}`, name: (hasLetters(l.name) ? l.name : l.phone || em).trim(), phone: l.phone?.replace(/\D/g, '') || undefined, email: em || undefined,
       source: src.split(':')[0], list: l.list || undefined, originStage: l.originStage || undefined,
       stage: client ? 'convertido' : (l.stage ?? 'novo'), tags: l.tags?.length ? l.tags : undefined,
-      firstSeenAt: l.firstSeenAt || undefined, lastContactAt: l.lastContactAt || undefined, notes: l.notes || undefined, channelId: l.channelId || undefined,
+      firstSeenAt: l.firstSeenAt || undefined, lastContactAt: l.lastContactAt || undefined, lastFromMe: l.lastFromMe, notes: l.notes || undefined, channelId: l.channelId || undefined,
       clientId: client?.id,
       ...(byName ? { notes: [l.notes, 'Ligada à aluna pelo nome'].filter(Boolean).join(' · ') } : {}),
     });

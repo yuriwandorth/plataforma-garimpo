@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { doc, updateDoc } from 'firebase/firestore';
+import { deleteField, doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useSession } from '@/lib/auth';
 import { useWriter } from '@/lib/db';
@@ -18,6 +18,7 @@ export default function ConfiguracoesPage() {
   const [mList, setMList] = useState('');
   const [handle, setHandle] = useState('');
   const [whats, setWhats] = useState('');
+  const [color, setColor] = useState('');
   const [newChannel, setNewChannel] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -29,13 +30,14 @@ export default function ConfiguracoesPage() {
     setMList((tenant.milestones ?? []).map((v) => fmtBRL(v).replace('R$', '').trim()).join('; '));
     setHandle(tenant.infinitePayHandle ?? '');
     setWhats(tenant.whatsapp ?? '');
+    setColor(tenant.brandColor ?? '');
   }, [tenant]);
 
   if (profile?.role !== 'owner' || !tenant) return <p className="text-sm text-mute">Só o(a) dono(a) altera as configurações.</p>;
 
   async function saveTenant() {
     const milestones = mList.split(';').map((s) => parseMoney(s.trim())).filter((v) => v > 0).sort((a, b) => a - b);
-    await updateDoc(doc(db, 'tenants', tenant!.id), { name: name.trim() || tenant!.name, milestonesStart: mStart, milestones, infinitePayHandle: handle.replace(/^\$/, '').trim(), whatsapp: whats.replace(/\D/g, '') });
+    await updateDoc(doc(db, 'tenants', tenant!.id), { name: name.trim() || tenant!.name, milestonesStart: mStart, milestones, infinitePayHandle: handle.replace(/^\$/, '').trim(), whatsapp: whats.replace(/\D/g, ''), brandColor: /^#[0-9a-f]{6}$/i.test(color) ? color : deleteField() });
     setMsg('Configurações salvas.');
   }
 
@@ -57,6 +59,18 @@ export default function ConfiguracoesPage() {
             <Field label="Nome da consultoria" className="sm:col-span-2"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
             <Field label="Conquistas: contar faturamento a partir de"><input className="input" type="date" value={mStart} onChange={(e) => setMStart(e.target.value)} /></Field>
             <Field label="Marcos de faturamento (R$, separados por ;)" hint="Ex.: 50.000; 100.000; 500.000; 1.000.000"><input className="input" value={mList} onChange={(e) => setMList(e.target.value)} /></Field>
+            <div className="sm:col-span-2">
+              <span className="label">Cor da marca</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <input type="color" aria-label="Cor da marca" className="h-9 w-12 cursor-pointer rounded border border-line bg-panel" value={/^#[0-9a-f]{6}$/i.test(color) ? color : '#b08420'} onChange={(e) => setColor(e.target.value)} />
+                <input className="input w-28 font-mono" value={color} placeholder="#b08420" onChange={(e) => setColor(e.target.value)} />
+                {['#b08420', '#c2185b', '#7b1fa2', '#1565c0', '#00897b', '#2e7d32', '#e65100', '#37474f'].map((c) => (
+                  <button key={c} type="button" title={c} onClick={() => setColor(c)} className="h-7 w-7 rounded-full border border-line" style={{ background: c }} />
+                ))}
+                <button type="button" className="text-xs text-mute hover:text-ink" onClick={() => setColor('')}>Voltar ao padrão</button>
+              </div>
+              <span className="mt-1 block text-xs text-mute">Muda botões, destaques e menus da plataforma para a cor da sua identidade visual. Salve para aplicar.</span>
+            </div>
             <Field label="InfiniteTag da InfinitePay" hint="Seu usuário no app InfinitePay, sem o $. Usado no checkout."><input className="input" placeholder="ex.: metodogarimpo" value={handle} onChange={(e) => setHandle(e.target.value)} /></Field>
             <Field label="WhatsApp da consultoria" hint="Aparece no botão da página de obrigado do checkout."><input className="input" placeholder="(81) 99999-9999" value={whats} onChange={(e) => setWhats(e.target.value)} /></Field>
           </div>

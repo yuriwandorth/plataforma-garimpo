@@ -1,11 +1,18 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { doc, writeBatch } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { useSession } from '@/lib/auth';
+import { colRef, docRef, useCollection, type Col } from '@/lib/db';
+import { useClients } from '@/lib/hooks';
 import { usePlans, useProducts } from '@/lib/hooks';
 import { useWriter } from '@/lib/db';
 import { fmtBRL2, parseMoney } from '@/lib/calc';
-import type { Modality, PaymentMethod, Period, Plan, Product } from '@/lib/types';
+import type { Modality, PaymentMethod, Period, Plan, Product, Sale } from '@/lib/types';
 import { PERIOD_LABEL } from '@/lib/types';
-import { Badge, Button, Card, Empty, Field, Modal, PageHeader, Spinner, Toggle } from '@/components/ui';
+import { BenefitsPicker } from '@/components/BenefitsPicker';
+import { CATEGORY_LABEL, DEFAULT_CATALOG } from '@/lib/offer';
+import { Badge, Button, Card, Empty, ErrorNote, Field, Modal, PageHeader, Spinner, Toggle } from '@/components/ui';
 
 const MODALITY: Record<Modality, string> = { online: 'Online', presencial: 'Presencial', consulta: 'Consulta' };
 const PERIODS: Period[] = ['mensal', 'trimestral', 'semestral', 'anual'];
@@ -17,6 +24,8 @@ export default function ProdutosPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [prodOpen, setProdOpen] = useState<Product | 'new' | null>(null);
   const [planOpen, setPlanOpen] = useState<{ plan?: Plan; productId: string } | null>(null);
+  const [showOld, setShowOld] = useState(false);
+  const [merge, setMerge] = useState<Plan | null>(null);
 
   const list = products.data.filter((p) => !!p.archived === showArchived);
 
@@ -35,7 +44,9 @@ export default function ProdutosPage() {
       ) : (
         <div className="space-y-4">
           {list.map((p) => {
-            const pl = plans.data.filter((x) => x.productId === p.id);
+            const allPl = plans.data.filter((x) => x.productId === p.id);
+            const oldCount = allPl.filter((x) => !x.active || x.mergedInto).length;
+            const pl = allPl.filter((x) => showOld ? true : x.active && !x.mergedInto);
             const prices = pl.filter((x) => x.active).map((x) => x.price);
             const inc = Object.entries(p.includes).filter(([, v]) => v).map(([k]) => ({ treino: 'Treino', dieta: 'Dieta', cardio: 'Cardio', medico: 'Médico' }[k]));
             return (
@@ -61,6 +72,7 @@ export default function ProdutosPage() {
                     </Button>
                   </div>
                 </div>
+                {oldCount > 0 && <button type="button" onClick={() => setShowOld(!showOld)} className="mt-3 text-xs text-gold hover:underline">{showOld ? 'Esconder planos antigos' : `Mostrar ${oldCount} plano(s) antigo(s) ou juntado(s)`}</button>}
                 {pl.length > 0 && (
                   <div className="mt-4 overflow-x-auto">
                     <table className="w-full">
@@ -72,10 +84,11 @@ export default function ProdutosPage() {
                             <td className="td">{PERIOD_LABEL[x.period]}</td>
                             <td className="td">{fmtBRL2(x.price)}</td>
                             <td className="td text-mute">{x.paymentMethods.join(', ')} · até {x.maxInstallments}x</td>
-                            <td className="td"><Badge tone={x.active ? 'good' : 'mute'}>{x.active ? 'Ativo' : 'Inativo'}</Badge></td>
+                            <td className="td"><Badge tone={x.active ? 'good' : 'mute'}>{x.mergedInto ? `Juntado em ${plans.byId[x.mergedInto]?.name ?? 'outro plano'}` : x.active ? 'Ativo' : 'Inativo'}</Badge>{(x.benefits ?? []).length > 0 && <div className="mt-0.5 text-xs text-mute">{x.benefits!.length} benefício(s)</div>}</td>
                             <td className="td">
                               <div className="flex justify-end gap-1">
                                 <Button size="sm" variant="ghost" onClick={() => setPlanOpen({ plan: x, productId: p.id })}>Editar</Button>
+                                {!x.mergedInto && <Button size="sm" variant="ghost" onClick={() => setMerge(x)}>Juntar com…</Button>}
                                 <Button size="sm" variant="ghost" onClick={() => {
                                   const { id, createdAt, ...rest } = x; void id; void createdAt;
                                   w.create('plans', { ...rest, name: `${x.name} (cópia)`, active: false }, `Plano duplicado: ${x.name}`);
@@ -94,6 +107,7 @@ export default function ProdutosPage() {
         </div>
       )}
       <ProductModal open={!!prodOpen} product={prodOpen === 'new' ? undefined : prodOpen ?? undefined} onClose={() => setProdOpen(null)} />
+      {merge && <MergePlanModal source={merge} plans={plans.data} onClose={() => setMerge(null)} />}
       <PlanModal open={!!planOpen} plan={planOpen?.plan} productId={planOpen?.productId ?? ''} products={products.data} onClose={() => setPlanOpen(null)} />
     </div>
   );
@@ -149,28 +163,28 @@ function blankProduct(): Omit<Product, 'id' | 'createdAt'> {
 
 function PlanModal({ open, plan, productId, products, onClose }: { open: boolean; plan?: Plan; productId: string; products: Product[]; onClose: () => void }) {
   const w = useWriter();
-  const [f, setF] = useState({ name: '', description: '', period: 'trimestral' as Period, price: '', methods: ['pix', 'cartao'] as PaymentMethod[], maxInstallments: 12, couple: false, active: true, productId });
+  const [f, setF] = useState({ name: '', description: '', period: 'trimestral' as Period, price: '', methods: ['pix', 'cartao'] as PaymentMethod[], maxInstallments: 12, couple: false, active: true, productId, benefits: [] as string[] });
   const [err, setErr] = useState('');
   useEffect(() => {
     if (!open) return;
     setErr('');
     setF(plan
-      ? { name: plan.name, description: plan.description ?? '', period: plan.period, price: String(plan.price).replace('.', ','), methods: plan.paymentMethods, maxInstallments: plan.maxInstallments, couple: plan.couple, active: plan.active, productId: plan.productId }
-      : { name: '', description: '', period: 'trimestral', price: '', methods: ['pix', 'cartao'], maxInstallments: 12, couple: false, active: true, productId });
+      ? { name: plan.name, description: plan.description ?? '', period: plan.period, price: String(plan.price).replace('.', ','), methods: plan.paymentMethods, maxInstallments: plan.maxInstallments, couple: plan.couple, active: plan.active, productId: plan.productId, benefits: plan.benefits ?? [] }
+      : { name: '', description: '', period: 'trimestral', price: '', methods: ['pix', 'cartao'], maxInstallments: 12, couple: false, active: true, productId, benefits: DEFAULT_CATALOG.filter((d) => d.always).map((d) => d.name) });
   }, [open, plan, productId]);
   async function save() {
     const price = parseMoney(f.price);
     if (!f.name.trim()) return setErr('Dê um nome ao plano.');
     if (!price) return setErr('Informe o preço.');
     if (!f.methods.length) return setErr('Escolha ao menos uma forma de pagamento.');
-    const data = { productId: f.productId, name: f.name.trim(), description: f.description || undefined, period: f.period, price, paymentMethods: f.methods, maxInstallments: f.maxInstallments, couple: f.couple, active: f.active };
+    const data = { productId: f.productId, name: f.name.trim(), description: f.description || undefined, period: f.period, price, paymentMethods: f.methods, maxInstallments: f.maxInstallments, couple: f.couple, active: f.active, benefits: f.benefits.length ? f.benefits : undefined };
     if (plan) await w.update<Plan>('plans', plan.id, data, `Plano editado: ${data.name}`);
     else await w.create('plans', data, `Plano criado: ${data.name}`);
     onClose();
   }
   const toggleMethod = (m: PaymentMethod, v: boolean) => setF({ ...f, methods: v ? [...f.methods, m] : f.methods.filter((x) => x !== m) });
   return (
-    <Modal open={open} onClose={onClose} title={plan ? 'Editar plano' : 'Novo plano'}
+    <Modal open={open} onClose={onClose} wide title={plan ? 'Editar plano' : 'Novo plano'}
       footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button onClick={save}>Salvar plano</Button></>}>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Nome do plano" className="sm:col-span-2"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Ex.: Garimpo Semestral" /></Field>
@@ -199,8 +213,72 @@ function PlanModal({ open, plan, productId, products, onClose }: { open: boolean
           <Toggle checked={f.couple} onChange={(v) => setF({ ...f, couple: v })} label="Plano de casal" hint="Uma venda para duas pessoas: lance uma venda para cada uma com metade do valor." />
           <Toggle checked={f.active} onChange={(v) => setF({ ...f, active: v })} label="Plano ativo" hint="Plano inativo some da escolha na hora de lançar venda." />
         </div>
+        <div className="sm:col-span-2">
+          <span className="label">Benefícios do plano</span>
+          <p className="mb-2 text-xs text-mute">Clique para montar o que está incluso. Aparece para a aluna na página de pagamento.</p>
+          <BenefitsPicker value={f.benefits} onChange={(v) => setF({ ...f, benefits: v })}
+            options={DEFAULT_CATALOG.map((d) => ({ name: d.name, group: CATEGORY_LABEL[d.category].title, hint: d.description }))} />
+        </div>
         <Field label="Descrição interna" className="sm:col-span-2" hint="Não aparece para a cliente."><textarea className="input" rows={2} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></Field>
         {err && <p className="text-sm text-bad sm:col-span-2">{err}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+/** Junta um plano repetido em outro: vendas, fichas e links de pagamento passam para o plano certo. O nome antigo fica guardado na venda. */
+function MergePlanModal({ source, plans, onClose }: { source: Plan; plans: Plan[]; onClose: () => void }) {
+  const { profile, user } = useSession();
+  const sales = useCollection<Sale & { originalPlanName?: string }>('sales');
+  const clients = useClients();
+  const links = useCollection<{ id: string; planId: string; planName: string }>('checkouts');
+  const [target, setTarget] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const t = plans.find((x) => x.id === target);
+  const mySales = sales.data.filter((x) => x.planId === source.id);
+  const myClients = clients.data.filter((c) => c.planId === source.id);
+  const myLinks = links.data.filter((l) => l.planId === source.id);
+  const options = plans.filter((x) => x.id !== source.id && !x.mergedInto).sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name));
+  async function run() {
+    if (!t) return setErr('Escolha o plano que fica.');
+    setBusy(true); setErr('');
+    try {
+      const tid = profile!.tenantId;
+      const ops: [Col, string, Record<string, unknown>][] = [
+        ...mySales.map((x): [Col, string, Record<string, unknown>] => ['sales', x.id, { planId: t.id, planName: t.name, originalPlanName: x.originalPlanName ?? x.planName }]),
+        ...myClients.map((c): [Col, string, Record<string, unknown>] => ['clients', c.id, { planId: t.id, planName: t.name, updatedAt: Date.now() }]),
+        ...myLinks.map((l): [Col, string, Record<string, unknown>] => ['checkouts', l.id, { planId: t.id, planName: t.name, updatedAt: Date.now() }]),
+        ['plans', source.id, { active: false, mergedInto: t.id }],
+      ];
+      for (let i = 0; i < ops.length; i += 400) {
+        const b = writeBatch(db);
+        for (const [c, id, d] of ops.slice(i, i + 400)) b.set(docRef(tid, c, id), d, { merge: true });
+        await b.commit();
+      }
+      const b = writeBatch(db);
+      b.set(doc(colRef(tid, 'audit')), { entity: 'plans', entityId: source.id, action: 'update', by: user!.uid, byName: profile!.name, at: Date.now(), summary: `Plano "${source.name}" juntado em "${t.name}" (${mySales.length} vendas, ${myClients.length} fichas)` });
+      await b.commit().catch(() => {});
+      onClose();
+    } catch (e) { console.error(e); setErr('Não foi possível juntar. Nada foi perdido; tente de novo.'); }
+    setBusy(false);
+  }
+  return (
+    <Modal open onClose={onClose} title={`Juntar "${source.name}"`} subtitle="As vendas, as fichas das alunas e os links de pagamento deste plano passam para o plano escolhido. Ele fica como antigo, só para histórico."
+      footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button onClick={run} disabled={busy || !t}>{busy ? 'Juntando…' : 'Juntar planos'}</Button></>}>
+      <div className="space-y-3">
+        <Field label="Plano que fica">
+          <select className="input" value={target} onChange={(e) => setTarget(e.target.value)}>
+            <option value="">Escolha…</option>
+            {options.map((x) => <option key={x.id} value={x.id}>{x.name} · {PERIOD_LABEL[x.period]}{x.active ? '' : ' (inativo)'}</option>)}
+          </select>
+        </Field>
+        <div className="rounded-lg border border-line p-3 text-sm">
+          Muda: <b>{mySales.length}</b> venda(s), <b>{myClients.length}</b> ficha(s) de aluna, <b>{myLinks.length}</b> link(s) de pagamento.
+          <div className="mt-1 text-xs text-mute">Valores, datas e vencimentos não mudam. Cada venda guarda o nome antigo ("{source.name}") como referência.</div>
+          {t && t.period !== source.period && <div className="mt-1 text-xs text-bad">Atenção: períodos diferentes ({PERIOD_LABEL[source.period]} → {PERIOD_LABEL[t.period]}). Os vencimentos já lançados continuam como estão.</div>}
+        </div>
+        <ErrorNote error={err} />
       </div>
     </Modal>
   );

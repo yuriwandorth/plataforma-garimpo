@@ -8,6 +8,7 @@ import { useMembers } from '@/lib/hooks';
 import { fmtDate } from '@/lib/calc';
 import type { Invite, Member } from '@/lib/types';
 import { Badge, Button, Card, Field, Modal, PageHeader, Spinner, Toggle } from '@/components/ui';
+import { NAV, STAFF_PAGES } from '@/lib/nav';
 
 export default function TimePage() {
   const { profile, tenant, user } = useSession();
@@ -93,14 +94,44 @@ export default function TimePage() {
 
 function EditMember({ m, self, onClose, save }: { m: Member; self: boolean; onClose: () => void; save: (d: Partial<Member>, s: string) => Promise<void> }) {
   const [f, setF] = useState({ name: m.name, cargo: m.cargo ?? '', isSeller: !!m.isSeller, active: m.active });
+  const [pages, setPages] = useState<string[]>(m.allowedPages ?? STAFF_PAGES.map((p) => p.href));
+  const isOwnerMember = m.role === 'owner';
   return (
-    <Modal open onClose={onClose} title={`Editar ${m.name}`}
-      footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button onClick={async () => { await save(f, `Membro editado: ${f.name}`); onClose(); }}>Salvar</Button></>}>
+    <Modal open onClose={onClose} wide title={`Editar ${m.name}`}
+      footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button onClick={async () => { await save({ ...f, ...(isOwnerMember ? {} : { allowedPages: pages.length === STAFF_PAGES.length ? undefined : pages }) }, `Membro editado: ${f.name}${isOwnerMember ? '' : ` (acesso a ${pages.length} tela(s))`}`); onClose(); }}>Salvar</Button></>}>
       <div className="space-y-3">
         <Field label="Nome"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
         <Field label="Cargo"><input className="input" value={f.cargo} onChange={(e) => setF({ ...f, cargo: e.target.value })} /></Field>
         <Toggle checked={f.isSeller} onChange={(v) => setF({ ...f, isSeller: v })} label="Atua como vendedor(a)" />
         {!self && <Toggle checked={f.active} onChange={(v) => setF({ ...f, active: v })} label="Ativo" hint="Desligar bloqueia o acesso na hora, sem apagar o histórico." />}
+        {!isOwnerMember && (
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="label mb-0">O que esta pessoa pode ver</span>
+              <span className="flex gap-2 text-xs"><button type="button" className="text-gold hover:underline" onClick={() => setPages(STAFF_PAGES.map((p) => p.href))}>Tudo</button><button type="button" className="text-mute hover:text-ink" onClick={() => setPages([])}>Nada</button></span>
+            </div>
+            <div className="space-y-2 rounded-lg border border-line p-3">
+              {NAV.map((g) => {
+                const items = g.items.filter((i) => !i.owner);
+                if (!items.length) return null;
+                return (
+                  <div key={g.group}>
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-mute">{g.group}</div>
+                    <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                      {items.map((i) => (
+                        <label key={i.href} className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" className="h-4 w-4 accent-[rgb(var(--gold))]" checked={pages.includes(i.href)} onChange={(e) => setPages(e.target.checked ? [...pages, i.href] : pages.filter((x) => x !== i.href))} />
+                          {i.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              <p className="text-xs text-mute">Diário, Time e Configurações são sempre só do dono. Quem não tem acesso a uma tela não a vê no menu.</p>
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   );

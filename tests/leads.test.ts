@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { leadBoard, matchClient, phoneKey, type Lead } from '../src/lib/leads';
+import { leadBoard, matchClient, nextFollowUp, phoneKey, type Lead } from '../src/lib/leads';
 import { planImport } from '../src/lib/importer';
 import type { Client, Sale } from '../src/lib/types';
 
@@ -95,5 +95,19 @@ describe('leads', () => {
         { id: 'B', name: 'B', phone: '81922223333', list: 'Lead frio', stage: 'novo' },
       ] }, { productId: 'p', today: '2026-11-27', by: 'u', newId: () => `id${++n}` });
     expect(r.leadUpdates).toEqual([{ id: 'A', data: { list: 'Leads frios' } }, { id: 'B', data: { tags: ['Leads frios'] } }]);
+  });
+
+  it('próximo follow-up pelos dados da conversa', () => {
+    const t = '2026-11-27';
+    expect(nextFollowUp({ id: 'a', stage: 'novo', lastContactAt: '2026-11-20', lastFromMe: false }, t)).toEqual({ at: t, kind: 'responder' });
+    expect(nextFollowUp({ id: 'a', stage: 'novo', lastContactAt: '2026-11-25', lastFromMe: true }, t)).toEqual({ at: '2026-11-28', kind: 'cobrar' });
+    expect(nextFollowUp({ id: 'a', stage: 'novo', lastContactAt: '2026-11-17', lastFromMe: true }, t)).toEqual({ at: t, kind: 'cobrar' });
+    const r = nextFollowUp({ id: 'xyz', stage: 'novo', lastContactAt: '2026-10-20', lastFromMe: true }, t)!;
+    expect(r.kind).toBe('retomar');
+    expect(r.at! >= t && r.at! <= '2026-12-10').toBe(true);
+    expect(nextFollowUp({ id: 'a', stage: 'novo', lastContactAt: '2026-06-01' }, t)).toEqual({ kind: 'frio' });
+    expect(nextFollowUp({ id: 'a', stage: 'novo', followUpAt: '2026-12-01', lastContactAt: '2026-06-01' }, t)).toEqual({ at: '2026-12-01', kind: 'agendado' });
+    expect(nextFollowUp({ id: 'a', stage: 'convertido' }, t)).toBeNull();
+    expect(nextFollowUp({ id: 'a', stage: 'nao_lead' }, t)).toBeNull();
   });
 });

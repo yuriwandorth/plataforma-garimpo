@@ -37,6 +37,7 @@ export default function PagarPage() {
         const d = s.exists() ? ({ id: s.id, ...s.data() } as CheckoutLink) : null;
         if (!d || !d.active) setState('off');
         else {
+          if (d.color && /^#[0-9a-f]{6}$/i.test(d.color)) { const n = parseInt(d.color.slice(1), 16); document.documentElement.style.setProperty('--gold', `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`); }
           setLink(d); setState('ok'); document.title = `${d.title} · ${d.brand}`;
           const fromUrl = couponCode(p.get('cupom') ?? '');
           if (fromUrl) { setCode(fromUrl); applyCoupon(t, fromUrl); }
@@ -105,6 +106,11 @@ export default function PagarPage() {
     <Shell brand={link.brand}>
       <h1 className="text-2xl font-semibold tracking-tight">{link.title}</h1>
       {link.description && <p className="mt-2 whitespace-pre-line text-sm text-mute">{link.description}</p>}
+      {(link.benefits ?? []).length > 0 && (
+        <ul className="mt-3 space-y-1 text-sm">
+          {link.benefits!.map((b) => <li key={b} className="flex gap-2"><span className="text-gold">✓</span>{b}</li>)}
+        </ul>
+      )}
       <div className="mt-4 rounded-xl border border-gold/40 bg-gold/10 p-4">
         <div className="text-xs uppercase tracking-wide text-mute">{PERIOD_LABEL[link.period]} · {months} {months === 1 ? 'mês' : 'meses'}</div>
         {coupon ? (

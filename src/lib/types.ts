@@ -22,6 +22,8 @@ export interface Tenant {
   infinitePayHandle?: string;
   /** WhatsApp da consultoria (só números) */
   whatsapp?: string;
+  /** Cor principal da marca (#RRGGBB) */
+  brandColor?: string;
 }
 
 export interface Member {
@@ -33,6 +35,8 @@ export interface Member {
   isSeller?: boolean;
   active: boolean;
   joinedAt?: string;
+  /** Telas liberadas (href). Vazio/indefinido = todas, menos as exclusivas do dono */
+  allowedPages?: string[];
 }
 
 export interface Invite {
@@ -130,6 +134,10 @@ export interface Plan {
   maxInstallments: number;
   couple: boolean;
   active: boolean;
+  /** O que está incluso (aparece na página de pagamento) */
+  benefits?: string[];
+  /** Plano juntado a outro (fica só para histórico) */
+  mergedInto?: string;
   createdAt: number;
   seed?: boolean;
 }

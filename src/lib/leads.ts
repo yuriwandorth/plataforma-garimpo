@@ -3,13 +3,14 @@
 import type { Client, Sale } from './types';
 import { countable, daysBetween } from './calc';
 
-export type LeadStage = 'novo' | 'em_contato' | 'negociando' | 'convertido' | 'perdido';
+export type LeadStage = 'novo' | 'em_contato' | 'negociando' | 'convertido' | 'perdido' | 'nao_lead';
 export const LEAD_STAGES: Record<LeadStage, { label: string; tone: 'mute' | 'gold' | 'warn' | 'good' | 'bad' }> = {
   novo: { label: 'Novo', tone: 'mute' },
   em_contato: { label: 'Em contato', tone: 'gold' },
   negociando: { label: 'Negociando', tone: 'warn' },
   convertido: { label: 'Virou aluna', tone: 'good' },
   perdido: { label: 'Perdido', tone: 'bad' },
+  nao_lead: { label: 'Não é lead', tone: 'mute' },
 };
 
 export interface Lead {
@@ -28,7 +29,15 @@ export interface Lead {
   tags?: string[];
   firstSeenAt?: string;
   lastContactAt?: string;
+  /** Última mensagem da conversa foi sua (true) ou dela (false) */
+  lastFromMe?: boolean;
+  /** Próximo follow-up marcado à mão (se vazio, a plataforma sugere) */
+  followUpAt?: string;
+  /** Revisado na triagem */
+  reviewedAt?: string;
   channelId?: string;
+  /** Influencer que trouxe o lead (cupom, link ou marcação manual) */
+  influencerId?: string;
   notes?: string;
   lostReason?: string;
   clientId?: string;
@@ -65,7 +74,7 @@ export function leadBoard(leads: Lead[], clients: Client[], sales: Sale[]) {
     const cur = firstSale.get(s.clientId);
     if (!cur || s.date < cur) firstSale.set(s.clientId, s.date);
   }
-  const views: LeadView[] = leads.filter((l) => !l.deleted).map((l) => {
+  const views: LeadView[] = leads.filter((l) => !l.deleted && l.stage !== 'nao_lead').map((l) => {
     const c = (l.clientId && clients.find((x) => x.id === l.clientId && !x.deleted)) || matchClient(l, clients);
     return { lead: l, client: c || undefined, firstSaleAt: c ? firstSale.get(c.id) : undefined };
   });
@@ -96,4 +105,45 @@ export function leadBoard(leads: Lead[], clients: Client[], sales: Sale[]) {
 
 export function isConverted(v: LeadView) {
   return !!v.firstSaleAt || v.lead.stage === 'convertido';
+}
+
+export type FupKind = 'responder' | 'cobrar' | 'retomar' | 'frio' | 'agendado';
+export const FUP_LABEL: Record<FupKind, string> = {
+  responder: 'Responder (ela falou por último)',
+  cobrar: 'Follow-up (você falou por último)',
+  retomar: 'Retomar conversa',
+  frio: 'Frio: campanha de reativação',
+  agendado: 'Follow-up agendado',
+};
+
+/** Espalha datas de forma estável (mesmo lead, mesmo dia) para não acumular tudo num dia só */
+function spread(id: string, days: number): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return h % days;
+}
+
+/**
+ * Próximo follow-up do lead, pelos dados da conversa (sem ler mensagens):
+ * - ela falou por último (até 30 dias): responder hoje
+ * - você falou por último há 2–14 dias: cobrar 3 dias depois do seu último envio (mínimo hoje)
+ * - 15–60 dias sem conversa: retomar nos próximos 14 dias (espalhado)
+ * - mais de 60 dias: frio, sem data (vai para campanha)
+ */
+export function nextFollowUp(l: Pick<Lead, 'id' | 'lastContactAt' | 'lastFromMe' | 'followUpAt' | 'stage'>, today: string): { at?: string; kind: FupKind } | null {
+  if (l.stage === 'convertido' || l.stage === 'perdido' || l.stage === 'nao_lead') return null;
+  if (l.followUpAt) return { at: l.followUpAt, kind: 'agendado' };
+  if (!l.lastContactAt) return { kind: 'frio' };
+  const age = daysBetween(l.lastContactAt, today);
+  if (l.lastFromMe === false && age <= 30) return { at: today, kind: 'responder' };
+  if (age < 2) return { at: addDaysISO(today, 2 - age), kind: 'cobrar' };
+  if (age <= 14) { const d = addDaysISO(l.lastContactAt, 3); return { at: d > today ? d : today, kind: 'cobrar' }; }
+  if (age <= 60) return { at: addDaysISO(today, spread(l.id, 14)), kind: 'retomar' };
+  return { kind: 'frio' };
+}
+
+function addDaysISO(d: string, n: number): string {
+  const [y, m, dd] = d.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, dd + n));
+  return t.toISOString().slice(0, 10);
 }

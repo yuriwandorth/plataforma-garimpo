@@ -4,8 +4,10 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useCollection, useWriter } from '@/lib/db';
 import { fmtDate, todayISO } from '@/lib/calc';
-import { DEFAULT_SECTORS, INPUT_LABEL, type KnowledgeInput, type KnowledgeSector } from '@/lib/manage';
+import { INPUT_LABEL, type KnowledgeInput, type KnowledgeSector } from '@/lib/manage';
 import { Badge, Button, Card, Empty, Field, Modal, PageHeader, Spinner } from '@/components/ui';
+import { HowTo } from '@/components/HowTo';
+import { KNOWLEDGE_TEMPLATES } from '@/lib/knowledgeTemplates';
 
 export default function Page() { return <Suspense fallback={<Spinner />}><Knowledge /></Suspense>; }
 
@@ -14,7 +16,20 @@ function Knowledge() {
   const sectors = useCollection<KnowledgeSector>('knowledge');
   const w = useWriter();
   const [newSector, setNewSector] = useState(false);
+  const [applying, setApplying] = useState(false);
   const list = [...sectors.data].sort((a, b) => a.order - b.order);
+  const norm = (x: string) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const missing = KNOWLEDGE_TEMPLATES.filter((t) => !list.some((s) => norm(s.name) === norm(t.name) && s.content));
+  async function applyTemplates() {
+    setApplying(true);
+    for (const [i, t] of KNOWLEDGE_TEMPLATES.entries()) {
+      const ex = list.find((s) => norm(s.name) === norm(t.name));
+      if (ex && ex.content) continue;
+      if (ex) await w.update<KnowledgeSector>('knowledge', ex.id, { content: t.content, description: ex.description || t.description }, `Base padrão aplicada: ${t.name}`);
+      else await w.create('knowledge', { name: t.name, description: t.description, order: list.length + i, content: t.content, inputs: [] }, `Setor criado com base padrão: ${t.name}`);
+    }
+    setApplying(false);
+  }
   if (sectors.loading) return <Spinner />;
   const current = id ? list.find((s) => s.id === id) : null;
   if (id && current) return <SectorView s={current} />;
@@ -22,10 +37,19 @@ function Knowledge() {
   return (
     <div>
       <PageHeader title="Base de conhecimento" subtitle="O manual da empresa, por setor. Junte transcrições de call, anotações e processos e organize num documento para repassar ao time."
-        actions={<Button variant="outline" onClick={() => setNewSector(true)}>Novo setor</Button>} />
+        actions={<><Button variant="outline" onClick={() => setNewSector(true)}>Novo setor</Button>{missing.length > 0 && <Button onClick={applyTemplates} disabled={applying}>{applying ? 'Criando…' : list.length ? `Completar com a base padrão (${missing.length})` : 'Usar base padrão'}</Button>}</>} />
+      <HowTo id="conhecimento" title="Como usar a Base de conhecimento">
+        <p><b>Para que serve:</b> é o manual da empresa, separado por setor. Tudo o que hoje está só na sua cabeça (como vender, como receber uma aluna nova, o que fazer quando alguém some) fica escrito aqui. Assim o time faz igual, sem depender de você responder toda hora.</p>
+        <p><b>Como começar:</b> clique em "Usar base padrão". Ela cria os setores já com um roteiro pronto para consultoria online de treino e dieta. Depois, abra cada setor e ajuste os trechos entre [colchetes] para a sua realidade.</p>
+        <ul>
+          <li><b>Insumos:</b> dentro de cada setor, cole transcrições de call, anotações e processos conforme eles surgem.</li>
+          <li><b>Documento:</b> de tempos em tempos, junte os insumos no texto do setor e marque-os como organizados.</li>
+        </ul>
+        <p><b>Quando:</b> sempre que você explicar a mesma coisa duas vezes para o time, isso vira um item aqui. Reserve 30 minutos por mês para revisar um setor.</p>
+      </HowTo>
       {list.length === 0 ? (
-        <Empty title="Nenhum setor ainda" text="Comece com os 5 setores padrão: Vendas, Marketing, Pós-venda e sucesso, Operações e processos, Gestão e financeiro."
-          action={<Button onClick={async () => { for (const [i, s] of DEFAULT_SECTORS.entries()) await w.create('knowledge', { ...s, order: i, content: '', inputs: [] }, `Setor criado: ${s.name}`); }}>Criar setores padrão</Button>} />
+        <Empty title="Nenhum setor ainda" text="Use a base padrão: 6 setores (Vendas, Marketing, Pós-venda e sucesso, Operações e processos, Gestão e financeiro, Jurídico e LGPD) já com um roteiro pronto para personalizar."
+          action={<Button onClick={applyTemplates} disabled={applying}>{applying ? 'Criando…' : 'Usar base padrão'}</Button>} />
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {list.map((s) => (

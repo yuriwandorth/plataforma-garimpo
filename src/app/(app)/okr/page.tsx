@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useCollection, useWriter } from '@/lib/db';
 import { addMonths, fmtBRL, fmtDate, fmtPct, parseMoney, todayISO } from '@/lib/calc';
 import { KR_LABEL, okrProgress, type KeyResult, type KRStatus, type Okr } from '@/lib/manage';
+import { HowTo } from '@/components/HowTo';
 import { Badge, Button, Card, Empty, Field, Modal, PageHeader, Progress, Spinner } from '@/components/ui';
 
 export default function OkrPage() {
@@ -22,6 +23,17 @@ export default function OkrPage() {
     <div>
       <PageHeader title="OKR" subtitle="O objetivo do ciclo e os resultados-chave que provam que ele foi atingido."
         actions={<Button onClick={() => setForm('new')}>Novo OKR</Button>} />
+      <HowTo id="okr" title="Como usar o OKR">
+        <p><b>Para que serve:</b> OKR significa Objetivo e Resultados-chave. É a meta do trimestre escrita de um jeito que todo mundo entende e que dá para medir. Ele evita o clássico "fiz um monte de coisa e não sei se o negócio andou".</p>
+        <p><b>Como montar:</b></p>
+        <ul>
+          <li><b>Objetivo:</b> uma frase que dá direção, sem número. Ex.: "Arrumar a casa para crescer com previsibilidade".</li>
+          <li><b>Resultados-chave (3 a 5):</b> números que provam que o objetivo foi atingido, com valor inicial e alvo. Ex.: "Taxa de renovação de 45% para 65%", "40 leads novos por semana", "100% das alunas com anamnese em até 48 h".</li>
+          <li>Resultado-chave é resultado, não tarefa. "Postar 3 reels" é tarefa (vai em Atividades); "Gerar 20 leads pelo Instagram" é resultado.</li>
+        </ul>
+        <p><b>Quando:</b> crie um OKR por ciclo de 90 dias. Atualize os números toda semana, num horário fixo (ex.: segunda de manhã), e revise o ciclo inteiro no fim dos 90 dias.</p>
+        <p><b>Dica:</b> use o Ranking do negócio para escolher o objetivo. A área mais fraca costuma ser o melhor foco do próximo ciclo.</p>
+      </HowTo>
       {okrs.loading ? <Spinner /> : !current ? (
         <Empty title="Nenhum OKR ativo" text="Defina um objetivo para os próximos 90 dias e 3 a 5 resultados-chave mensuráveis." action={<Button onClick={() => setForm('new')}>Criar OKR</Button>} />
       ) : (
