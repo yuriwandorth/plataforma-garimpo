@@ -66,3 +66,30 @@ describe('importação', () => {
     expect(again.skipped).toEqual({ influencers: 1, clients: 2, sales: 3, leads: 0 });
   });
 });
+
+describe('migração: metas, indicações, campanhas', () => {
+  const ex: Existing = {
+    clients: [{ id: 'c1', name: 'Ludmila Souza Neres' }, { id: 'c2', name: 'Bia Garimpeira Lima' }, { id: 'c3', name: 'Carla Melo' }],
+    plans: [], influencers: [{ id: 'i1', name: 'Geovanna', handle: 'geozonna' }],
+    sales: [{ id: 's1', clientId: 'c1', date: '2026-11-23', gross: 2097 }, { id: 's2', clientId: 'c1', date: '2025-11-01', gross: 800, influencerId: 'i1' }, { id: 's3', clientId: 'c3', date: '2026-01-01', gross: 1 }],
+    campaigns: [{ id: 'kairos-old' }],
+  };
+  const r = planImport({
+    source: 'kairos',
+    goals: [{ year: 2026, month: 9, channelId: 'renovacao', weeks: [{ revenue: 2500 }, { revenue: 2500 }, { revenue: 2500 }, { revenue: 2500 }] }],
+    referrals: [{ client: 'Ludmila Souza Neres', by: 'Geovanna' }, { client: 'Carla Melo', by: 'Bia Lima' }, { client: 'Ninguém', by: 'X' }],
+    campaigns: [{ key: 'old', name: 'x', occasion: 'Black Friday', start: '', end: '', status: 'ativa', offer: '', prices: [], channels: [] }, { key: 'bf', name: 'BF', occasion: 'Black Friday', start: '2026-11-20', end: '2026-11-27', status: 'ativa', offer: '', prices: [], channels: [] }],
+  }, ex, opts);
+  it('meta vira doc do mês/canal', () => {
+    expect(r.goals).toEqual([{ id: '2026-09__renovacao', data: { year: 2026, month: 9, channelId: 'renovacao', weeks: [2500, 2500, 2500, 2500].map((v) => ({ revenue: v, sales: 0 })) } }]);
+  });
+  it('indicação de influencer liga cliente e vendas; de aluna vira indicada por', () => {
+    expect(r.saleUpdates).toEqual([{ id: 's1', data: { influencerId: 'i1' } }]);
+    expect(r.clientUpdates).toContainEqual({ id: 'c1', data: { influencerId: 'i1' } });
+    expect(r.clientUpdates).toContainEqual({ id: 'c3', data: { referredById: 'c2' } });
+    expect(r.warnings.some((w) => w.includes('Ninguém'))).toBe(true);
+  });
+  it('campanha já importada não repete', () => {
+    expect(r.campaigns.map((c) => c.id)).toEqual(['kairos-bf']);
+  });
+});

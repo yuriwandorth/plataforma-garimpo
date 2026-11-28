@@ -1,7 +1,8 @@
 // Importação em massa (ex.: dados da Kairós): planeja o que é novo e o que já existe, sem duplicar.
 // Função pura testada em tests/importer.test.ts; a página /importar só grava o plano.
-import type { Client, ClientStatus, PaymentMethod, Period, Plan, Sale, SaleKind } from './types';
-import type { Influencer } from './growth';
+import type { ChannelGoal, Client, ClientStatus, PaymentMethod, Period, Plan, Sale, SaleKind } from './types';
+import type { Campaign, Influencer } from './growth';
+import type { Okr } from './manage';
 import { planEndDate } from './calc';
 import { matchClient, phoneKey, type Lead, type LeadStage } from './leads';
 
@@ -25,14 +26,21 @@ export interface ImpSale {
   notes?: string;
 }
 export interface ImpLead { key: string; name: string; phone?: string; email?: string; list?: string; originStage?: string; stage?: LeadStage; tags?: string[]; firstSeenAt?: string; lastContactAt?: string; lastFromMe?: boolean; notes?: string; channelId?: string }
-export interface ImportPayload { source: string; influencers?: ImpInfluencer[]; clients?: ImpClient[]; sales?: ImpSale[]; leads?: ImpLead[] }
+/** Quem trouxe a cliente (influencer ou outra aluna), pelo nome */
+export interface ImpReferral { client: string; by: string }
+export interface ImpCampaign extends Omit<Campaign, 'id' | 'createdAt' | 'updatedAt'> { key: string }
+export interface ImpOkr extends Omit<Okr, 'id' | 'createdAt' | 'updatedAt'> { key: string }
+export interface ImpGoal { year: number; month: number; channelId: string; weeks: { revenue: number; sales?: number }[] }
+export interface ImportPayload { source: string; influencers?: ImpInfluencer[]; clients?: ImpClient[]; sales?: ImpSale[]; leads?: ImpLead[]; goals?: ImpGoal[]; referrals?: ImpReferral[]; campaigns?: ImpCampaign[]; okrs?: ImpOkr[] }
 
 type WithId<T> = T & { id: string };
 export interface Existing {
-  clients: Pick<Client, 'id' | 'name' | 'email' | 'phone' | 'endDate' | 'deleted'>[];
+  clients: (Pick<Client, 'id' | 'name' | 'email' | 'phone' | 'endDate' | 'deleted'> & Partial<Pick<Client, 'influencerId' | 'referredById'>>)[];
   plans: Pick<Plan, 'id' | 'name' | 'period' | 'productId'>[];
   influencers: Pick<Influencer, 'id' | 'name' | 'handle' | 'email'>[];
-  sales: (Pick<Sale, 'id' | 'clientId' | 'date' | 'gross'> & { importKey?: string })[];
+  sales: (Pick<Sale, 'id' | 'clientId' | 'date' | 'gross'> & { importKey?: string; influencerId?: string })[];
+  campaigns?: { id: string }[];
+  okrs?: { id: string }[];
   leads?: Pick<Lead, 'id' | 'name' | 'phone' | 'email' | 'list' | 'tags' | 'deleted' | 'stage' | 'clientId' | 'lastContactAt'>[];
 }
 
@@ -46,6 +54,12 @@ export interface ImportPlan {
   leads: WithId<Omit<Lead, 'id' | 'createdAt' | 'updatedAt'>>[];
   /** Leads que já existiam e ganharam lista/etiqueta nova */
   leadUpdates: { id: string; data: Partial<Lead> }[];
+  /** Metas por canal (sobrescrevem a meta do mês/canal) */
+  goals: { id: string; data: Pick<ChannelGoal, 'year' | 'month' | 'channelId' | 'weeks'> }[];
+  /** Vendas que passam a contar para uma influencer */
+  saleUpdates: { id: string; data: Partial<Sale> }[];
+  campaigns: WithId<Omit<Campaign, 'id' | 'createdAt' | 'updatedAt'>>[];
+  okrs: WithId<Omit<Okr, 'id' | 'createdAt' | 'updatedAt'>>[];
   skipped: { influencers: number; clients: number; sales: number; leads: number };
   warnings: string[];
 }
@@ -67,7 +81,7 @@ export function periodFromName(name: string): Period | null {
 }
 
 export function planImport(p: ImportPayload, ex: Existing, opts: { productId: string; today: string; by: string; newId: () => string }): ImportPlan {
-  const out: ImportPlan = { influencers: [], plans: [], clients: [], sales: [], clientUpdates: [], leads: [], leadUpdates: [], skipped: { influencers: 0, clients: 0, sales: 0, leads: 0 }, warnings: [] };
+  const out: ImportPlan = { influencers: [], plans: [], clients: [], sales: [], clientUpdates: [], leads: [], leadUpdates: [], goals: [], saleUpdates: [], campaigns: [], okrs: [], skipped: { influencers: 0, clients: 0, sales: 0, leads: 0 }, warnings: [] };
   const src = p.source;
 
   // Influencers: casa por @ ou e-mail
@@ -224,6 +238,48 @@ export function planImport(p: ImportPayload, ex: Existing, opts: { productId: st
       clientId: client?.id,
       ...(byName ? { notes: [l.notes, 'Ligada à aluna pelo nome'].filter(Boolean).join(' · ') } : {}),
     });
+  }
+  // Metas por canal
+  for (const g of p.goals ?? []) {
+    if (!g.channelId || !(g.month >= 1 && g.month <= 12) || !g.year) { out.warnings.push(`Meta inválida: ${g.year}-${g.month} ${g.channelId}`); continue; }
+    const w = [0, 1, 2, 3].map((i) => ({ revenue: Math.max(0, Number(g.weeks[i]?.revenue) || 0), sales: Math.max(0, Number(g.weeks[i]?.sales) || 0) })) as ChannelGoal['weeks'];
+    out.goals.push({ id: `${g.year}-${String(g.month).padStart(2, '0')}__${g.channelId}`, data: { year: g.year, month: g.month, channelId: g.channelId, weeks: w } });
+  }
+  // Indicações: influencer → todas as vendas da cliente contam para ela; aluna → indicada por
+  const sameName = (a: string, b: string) => {
+    const x = nameTokens(a), y = nameTokens(b);
+    if (!x.length || !y.length) return false;
+    if (x.join(' ') === y.join(' ')) return true;
+    return x.length >= 2 && y.length >= 2 && x[0] === y[0] && (x.every((w) => y.includes(w)) || y.every((w) => x.includes(w)));
+  };
+  const findOne = <T extends { name: string }>(arr: T[], n: string) => { const h = arr.filter((c) => sameName(c.name, n)); return h.length === 1 ? h[0] : undefined; };
+  const cliUpd = new Map(out.clientUpdates.map((u) => [u.id, u]));
+  for (const r of p.referrals ?? []) {
+    const c = findOne(live, r.client);
+    if (!c) { out.warnings.push(`Indicação: cliente "${r.client}" não encontrada`); continue; }
+    const inf = findOne(ex.influencers, r.by);
+    const upd = (data: Partial<Client>) => { const u = cliUpd.get(c.id); if (u) Object.assign(u.data, data); else { const n = { id: c.id, data }; cliUpd.set(c.id, n); out.clientUpdates.push(n); } };
+    if (inf) {
+      if (c.influencerId !== inf.id) upd({ influencerId: inf.id });
+      for (const s of ex.sales) if (s.clientId === c.id && s.influencerId !== inf.id) out.saleUpdates.push({ id: s.id, data: { influencerId: inf.id } });
+      continue;
+    }
+    const by = live.find((x) => x.id !== c.id && sameName(x.name, r.by));
+    if (by) { if (!c.referredById) upd({ referredById: by.id }); continue; }
+    out.warnings.push(`Indicação de "${r.client}": "${r.by}" não é influencer nem aluna cadastrada`);
+  }
+  // Campanhas e OKRs (não repete o que já veio)
+  for (const c of p.campaigns ?? []) {
+    const id = `${src.split(':')[0]}-${c.key}`.replace(/[^\w-]/g, '');
+    if ((ex.campaigns ?? []).some((x) => x.id === id)) continue;
+    const { key: _k, ...rest } = c;
+    out.campaigns.push({ ...rest, id });
+  }
+  for (const o of p.okrs ?? []) {
+    const id = `${src.split(':')[0]}-${o.key}`.replace(/[^\w-]/g, '');
+    if ((ex.okrs ?? []).some((x) => x.id === id)) continue;
+    const { key: _k, ...rest } = o;
+    out.okrs.push({ ...rest, id });
   }
   return out;
 }

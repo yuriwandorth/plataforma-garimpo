@@ -28,6 +28,8 @@ export default function ImportarPage() {
   const sales = useCollection<Sale & { importKey?: string }>('sales');
   const w = useWriter();
   const leads = useCollection<Lead>('leads');
+  const campaigns = useCollection<{ id: string }>('campaigns');
+  const okrs = useCollection<{ id: string }>('okrs');
 
   const [kind, setKind] = useState<SheetKind>('clientes');
   const [fileName, setFileName] = useState('');
@@ -86,7 +88,7 @@ export default function ImportarPage() {
     if (!prodId) return setErr('Cadastre um produto em Produtos e planos antes de importar.');
     const tid = profile!.tenantId;
     setPayload(p);
-    setPlan(planImport(p, { clients: clients.data, plans: plans.data, influencers: influencers.data, sales: sales.data, leads: leads.data }, {
+    setPlan(planImport(p, { clients: clients.data, plans: plans.data, influencers: influencers.data, sales: sales.data, leads: leads.data, campaigns: campaigns.data, okrs: okrs.data }, {
       productId: prodId, today: todayISO(), by: user!.uid, newId: () => doc(collection(db, 'tenants', tid, 'clients')).id,
     }));
   }
@@ -120,6 +122,10 @@ export default function ImportarPage() {
       ...plan.clientUpdates.map(({ id, data }): Op => ['clients', id, { ...data, updatedAt: now }, true]),
       ...plan.leads.map(({ id, ...d }): Op => ['leads', id, { ...d, createdAt: now, updatedAt: now }, false]),
       ...plan.leadUpdates.map(({ id, data }): Op => ['leads', id, { ...data, updatedAt: now }, true]),
+      ...plan.goals.map(({ id, data }): Op => ['goals', id, data, true]),
+      ...plan.saleUpdates.map(({ id, data }): Op => ['sales', id, data, true]),
+      ...plan.campaigns.map(({ id, ...d }): Op => ['campaigns', id, { ...d, createdAt: now, updatedAt: now }, false]),
+      ...plan.okrs.map(({ id, ...d }): Op => ['okrs', id, { ...d, createdAt: now, updatedAt: now }, false]),
     ];
     try {
       for (let i = 0; i < ops.length; i += 400) {
@@ -134,7 +140,7 @@ export default function ImportarPage() {
       for (const i of plan.influencers.filter((x) => x.coupon)) {
         await syncInfluencerCoupon(w, { id: i.id, name: i.name, coupon: i.coupon, couponPct: i.couponPct, stage: i.stage, active: i.active }).catch(() => {});
       }
-      const summary = [plan.clients.length && `${plan.clients.length} clientes`, plan.sales.length && `${plan.sales.length} vendas`, plan.influencers.length && `${plan.influencers.length} influencers`, plan.leads.length && `${plan.leads.length} leads`, plan.plans.length && `${plan.plans.length} planos antigos`].filter(Boolean).join(', ') || 'nada novo';
+      const summary = [plan.clients.length && `${plan.clients.length} clientes`, plan.sales.length && `${plan.sales.length} vendas`, plan.influencers.length && `${plan.influencers.length} influencers`, plan.leads.length && `${plan.leads.length} leads`, plan.plans.length && `${plan.plans.length} planos antigos`, plan.goals.length && `${plan.goals.length} metas por canal`, plan.saleUpdates.length && `${plan.saleUpdates.length} vendas ligadas a influencers`, plan.campaigns.length && `${plan.campaigns.length} campanha(s)`, plan.okrs.length && `${plan.okrs.length} OKR(s)`].filter(Boolean).join(', ') || 'nada novo';
       const b = writeBatch(db);
       b.set(doc(colRef(tid, 'audit')), { entity: 'import', entityId: payload.source, action: 'create', by: user!.uid, byName: profile!.name, at: Date.now(), summary: `Importação (${payload.source}): ${summary}` });
       await b.commit().catch(() => {});
@@ -226,7 +232,7 @@ export default function ImportarPage() {
         {done && <div className="rounded-lg border border-good/40 bg-good/10 p-3 text-sm text-good">Importação concluída: {done}. Confira em {kind === 'leads' ? 'Leads' : 'Central de clientes, Vendas e Influencers'}.</div>}
 
         {plan && (
-          <Card title="3. Prévia" action={<Button onClick={run} disabled={!!progress || (!plan.clients.length && !plan.sales.length && !plan.influencers.length && !plan.clientUpdates.length && !plan.leads.length && !plan.leadUpdates.length)}>{progress || 'Importar'}</Button>}>
+          <Card title="3. Prévia" action={<Button onClick={run} disabled={!!progress || (!plan.clients.length && !plan.sales.length && !plan.influencers.length && !plan.clientUpdates.length && !plan.leads.length && !plan.leadUpdates.length && !plan.goals.length && !plan.saleUpdates.length && !plan.campaigns.length && !plan.okrs.length)}>{progress || 'Importar'}</Button>}>
             <div className="grid gap-3 sm:grid-cols-4">
               {kind === 'leads' && !payload?.clients ? <>
                 <Stat label="Leads novos" value={plan.leads.length} sub={`${plan.skipped.leads} já existiam`} />
@@ -238,6 +244,9 @@ export default function ImportarPage() {
                 <Stat label="Vendas novas" value={plan.sales.length} sub={`${plan.skipped.sales} já existiam`} />
                 <Stat label="Influencers novas" value={plan.influencers.length} sub={`${plan.skipped.influencers} já existiam`} />
                 <Stat label="Planos novos" value={plan.plans.length} sub="entram inativos" />
+                {plan.saleUpdates.length > 0 && <Stat label="Vendas → influencer" value={plan.saleUpdates.length} sub="passam a contar no faturamento dela" />}
+                {(plan.campaigns.length + plan.okrs.length) > 0 && <Stat label="Campanhas e OKRs" value={plan.campaigns.length + plan.okrs.length} sub={`${plan.campaigns.length} campanha(s) · ${plan.okrs.length} OKR(s)`} />}
+                {plan.goals.length > 0 && <Stat label="Metas por canal" value={plan.goals.length} sub={`${new Set(plan.goals.map((g) => g.id.slice(0, 7))).size} mês(es)`} />}
               </>}
             </div>
             {plan.plans.length > 0 && <p className="mt-3 text-xs text-mute">Planos que serão criados: {plan.plans.map((p) => `${p.name} (${p.period})`).join(' · ')}. Se o período estiver errado, ajuste depois em Produtos e planos.</p>}

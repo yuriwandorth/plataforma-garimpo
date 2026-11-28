@@ -36,8 +36,8 @@ export default function MetasPage() {
   // Totais do mês (todas as vendas + ajustes manuais)
   const monthSales = sales.data.filter((s) => s.date >= iso(ym.y, ym.m, 1));
   const manual = goals.data.reduce((a, g) => ({
-    revenue: a.revenue + g.manual.reduce((x, w) => x + (w.revenue || 0), 0),
-    sales: a.sales + g.manual.reduce((x, w) => x + (w.sales || 0), 0),
+    revenue: a.revenue + (g.manual ?? []).reduce((x, w) => x + (w.revenue || 0), 0),
+    sales: a.sales + (g.manual ?? []).reduce((x, w) => x + (w.sales || 0), 0),
   }), { revenue: 0, sales: 0 });
   const mt = totals(monthSales);
   const revenue = mt.gross + manual.revenue;
