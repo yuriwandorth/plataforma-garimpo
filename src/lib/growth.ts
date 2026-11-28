@@ -282,6 +282,12 @@ export interface TrackedOrigin {
   description?: string;
   /** De onde veio o cadastro (ex.: leadfy) */
   source?: string;
+  /** Endereço curto do link próprio (/r/?l=slug) */
+  slug?: string;
+  /** Mensagem pronta que chega no WhatsApp (vazia = padrão) */
+  message?: string;
+  /** Link próprio desligado */
+  paused?: boolean;
 }
 
 /** Tipo provável pelo nome da origem */

@@ -9,6 +9,8 @@ import { countable, fmtBRL, fmtDate, net, parseMoney, parts, sameMonth, todayISO
 import { commissionFor, DEFAULT_TIERS, trialDaysLeft, type CommissionModel, type InfluencerMonth } from '@/lib/growth';
 import type { Sale } from '@/lib/types';
 import type { Lead } from '@/lib/leads';
+import type { Click } from '@/lib/tracking';
+import { useSession } from '@/lib/auth';
 import { Badge, Button, Card, Progress, Spinner, Stat } from '@/components/ui';
 import { MonthPicker } from '@/components/MonthPicker';
 import { InfluencerModal } from '@/components/InfluencerForms';
@@ -22,6 +24,10 @@ function Panel() {
   const models = useCollection<CommissionModel>('commissionModels');
   const sales = useCollection<Sale>('sales', [where('influencerId', '==', id || '__')], `is-${id}`);
   const infLeads = useCollection<Lead>('leads', [where('influencerId', '==', id || '__')], `il-${id}`);
+  const { tenant } = useSession();
+  const myOrigins = (tenant?.origins ?? []).filter((o) => o.influencerId === id);
+  const myOriginIds = myOrigins.map((o) => o.id);
+  const clicks = useCollection<Click>('clicks', myOriginIds.length ? [where('originId', 'in', myOriginIds.slice(0, 10))] : [where('originId', '==', '__nenhuma__')], `ck-${myOriginIds.join(',')}`);
   const t = parts(todayISO());
   const [ym, setYm] = useState({ y: t.y, m: t.m });
   const docId = `${id}__${ym.y}-${String(ym.m).padStart(2, '0')}`;
@@ -53,9 +59,11 @@ function Panel() {
   const weeks = weekRanges(ym.y, ym.m).map((wk, k) => {
     const s = monthSales.filter((x) => x.date >= wk.start && x.date <= wk.end);
     const auto = infLeads.data.filter((l) => !l.deleted && l.firstSeenAt && l.firstSeenAt >= wk.start && l.firstSeenAt <= wk.end).length;
-    return { ...wk, revenue: s.reduce((a, x) => a + x.gross, 0), net: s.reduce((a, x) => a + net(x), 0), count: s.length, goal: m.goals[k] || 0, manual: m.leads[k] || 0, auto, leads: (m.leads[k] || 0) + auto };
+    const ck = clicks.data.filter((c) => c.day >= wk.start && c.day <= wk.end).length;
+    return { ...wk, clicks: ck, revenue: s.reduce((a, x) => a + x.gross, 0), net: s.reduce((a, x) => a + net(x), 0), count: s.length, goal: m.goals[k] || 0, manual: m.leads[k] || 0, auto, leads: (m.leads[k] || 0) + auto };
   });
   const leads = weeks.reduce((a, x) => a + x.leads, 0);
+  const monthClicks = weeks.reduce((a, x) => a + x.clicks, 0);
   const goal = weeks.reduce((a, x) => a + x.goal, 0);
   const left = trialDaysLeft(i, todayISO());
   const showPermuta = i.deal !== 'comissao';
@@ -83,7 +91,7 @@ function Panel() {
 
       <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Faturamento no mês" value={fmtBRL(revenue)} sub={goal ? `meta ${fmtBRL(goal)}` : 'sem meta definida'} />
-        <Stat label="Leads gerados" value={leads} />
+        <Stat label="Leads gerados" value={leads} sub={myOrigins.length ? `${monthClicks} clique(s) no link` : 'sem link rastreado'} />
         <Stat label="Vendas" value={monthSales.length} />
         <Stat label="Ticket médio" value={fmtBRL(monthSales.length ? revenue / monthSales.length : 0)} />
       </div>
@@ -135,7 +143,7 @@ function Panel() {
       <Card title="Semanas" action={<span className="text-xs text-mute">{saved || 'meta e leads salvam ao sair do campo · leads com cupom/link dela entram sozinhos (auto)'}</span>}>
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead><tr className="border-b border-line"><th className="th">Semana</th><th className="th">Meta receita</th><th className="th">Faturamento</th><th className="th">Líquido</th><th className="th">Leads</th><th className="th">Vendas</th><th className="th">Ticket</th></tr></thead>
+            <thead><tr className="border-b border-line"><th className="th">Semana</th><th className="th">Meta receita</th><th className="th">Faturamento</th><th className="th">Líquido</th><th className="th">Cliques</th><th className="th">Leads</th><th className="th">Vendas</th><th className="th">Ticket</th></tr></thead>
             <tbody>
               {weeks.map((wk, k) => (
                 <tr key={wk.label} className="border-b border-line/60">
@@ -143,12 +151,13 @@ function Panel() {
                   <td className="td"><input className="input w-28" defaultValue={wk.goal || ''} key={`g${docId}${k}${wk.goal}`} onBlur={(e) => { const g = [...m.goals] as InfluencerMonth['goals']; g[k] = parseMoney(e.target.value); persist({ ...m, goals: g }); }} /></td>
                   <td className="td">{fmtBRL(wk.revenue)} <span className="text-[10px] text-mute">auto</span></td>
                   <td className="td">{fmtBRL(wk.net)}</td>
+                  <td className="td">{wk.clicks}</td>
                   <td className="td"><div className="flex items-center gap-2"><input className="input w-16" type="number" min={0} title="Leads anotados à mão" defaultValue={wk.manual || ''} key={`l${docId}${k}${wk.manual}`} onBlur={(e) => { const l = [...m.leads] as InfluencerMonth['leads']; l[k] = Number(e.target.value) || 0; persist({ ...m, leads: l }); }} />{wk.auto > 0 && <span className="whitespace-nowrap text-xs text-mute" title="Leads com cupom, link ou marcação desta influencer">+{wk.auto} auto</span>}</div></td>
                   <td className="td">{wk.count}</td>
                   <td className="td">{fmtBRL(wk.count ? wk.revenue / wk.count : 0)}</td>
                 </tr>
               ))}
-              <tr><td className="td font-semibold">Total do mês</td><td className="td font-semibold">{fmtBRL(goal)}</td><td className="td font-semibold">{fmtBRL(revenue)}</td><td className="td" /><td className="td font-semibold">{leads}</td><td className="td font-semibold">{monthSales.length}</td><td className="td" /></tr>
+              <tr><td className="td font-semibold">Total do mês</td><td className="td font-semibold">{fmtBRL(goal)}</td><td className="td font-semibold">{fmtBRL(revenue)}</td><td className="td" /><td className="td font-semibold">{monthClicks}</td><td className="td font-semibold">{leads}</td><td className="td font-semibold">{monthSales.length}</td><td className="td" /></tr>
             </tbody>
           </table>
         </div>

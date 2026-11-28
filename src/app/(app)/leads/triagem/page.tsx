@@ -7,6 +7,8 @@ import { useCollection, useWriter } from '@/lib/db';
 import { useClients } from '@/lib/hooks';
 import { fmtBRL, fmtDate, todayISO } from '@/lib/calc';
 import { matchClient, phoneKey, type Lead } from '@/lib/leads';
+import { useSession } from '@/lib/auth';
+import { cleanSlug, originSlug } from '@/lib/tracking';
 import { CHURN_REASONS, suggestedRecall, type ChurnReason } from '@/lib/retention';
 import type { Client } from '@/lib/types';
 import { Badge, Button, Card, Empty, PageHeader, Spinner, Stat } from '@/components/ui';
@@ -37,6 +39,11 @@ export default function TriagemPage() {
   const [pick, setPick] = useState<string>('');
   const [reason, setReason] = useState<ChurnReason | ''>('');
   const [done, setDone] = useState(0);
+  const { tenant } = useSession();
+  const origins = tenant?.origins ?? [];
+  const [originId, setOriginId] = useState('');
+  const [code, setCode] = useState('');
+  const shownOrigins = useMemo(() => { const c = cleanSlug(code); return c ? origins.filter((o) => originSlug(o).includes(c) || cleanSlug(o.name).includes(c)) : origins; }, [code, origins]);
 
   // fila: quem ainda não foi revisado nem virou aluna; primeiro quem parece aluna/ex-aluna, depois sem etiqueta
   const queue = useMemo(() => leads.data
@@ -56,7 +63,8 @@ export default function TriagemPage() {
     return clients.data.filter((c) => !c.deleted && term.every((t) => norm(c.name).includes(t))).slice(0, 6);
   }, [cur, q, clients.data]);
 
-  useEffect(() => { setQ(''); setPick(''); setReason(''); }, [cur?.id]);
+  useEffect(() => { setQ(''); setPick(''); setReason(''); setOriginId(cur?.origin ? origins.find((o) => o.name === cur.origin)?.id ?? '' : ''); setCode(''); }, [cur?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const chosen = origins.find((o) => o.id === originId);
   useEffect(() => { if (suggestions.length === 1 && !pick) setPick(suggestions[0].id); }, [suggestions, pick]);
 
   async function decide(d: Decision) {
@@ -65,7 +73,10 @@ export default function TriagemPage() {
     const undo: Undo = { lead: cur };
     try {
       if (d === 'lead') {
-        await w.update<Lead>('leads', cur.id, { reviewedAt: today }, `Triagem: ${cur.name} é lead`);
+        await w.update<Lead>('leads', cur.id, {
+          reviewedAt: today,
+          ...(chosen ? { origin: chosen.name, ...(chosen.influencerId ? { influencerId: chosen.influencerId, channelId: cur.channelId ?? 'influencer' } : {}) } : {}),
+        }, `Triagem: ${cur.name} é lead${chosen ? ` (origem ${chosen.name})` : ''}`);
       } else if (d === 'nao') {
         await w.update<Lead>('leads', cur.id, { reviewedAt: today, stage: 'nao_lead' }, `Triagem: ${cur.name} não é lead`);
       } else {
@@ -188,8 +199,23 @@ export default function TriagemPage() {
             </div>
           </div>
 
+          {origins.length > 0 && (
+            <div className="mt-3 rounded-lg border border-line p-3">
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-medium text-mute">Chegou por qual link? (a mensagem pronta traz o "cód.")</span>
+                <input className="input w-36 py-1 text-xs" placeholder="digite o cód." value={code} onChange={(e) => { setCode(e.target.value); const c = cleanSlug(e.target.value); const hit = c && origins.filter((o) => originSlug(o) === c); if (hit && hit.length === 1) setOriginId(hit[0].id); }} />
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {shownOrigins.map((o) => (
+                  <button key={o.id} type="button" onClick={() => setOriginId(originId === o.id ? '' : o.id)}
+                    className={`rounded-full border px-2.5 py-1 text-xs ${originId === o.id ? 'border-gold bg-gold/10 font-semibold' : 'border-line hover:border-gold/50'}`}>{o.name}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="mt-4 grid gap-2 sm:grid-cols-4">
-            <Button onClick={() => decide('lead')} disabled={busy}><b className="mr-1">L</b> É lead</Button>
+            <Button onClick={() => decide('lead')} disabled={busy}><b className="mr-1">L</b> É lead{chosen ? ` · ${chosen.name}` : ''}</Button>
             <Button variant="outline" onClick={() => decide('aluna')} disabled={busy}><b className="mr-1">A</b> Aluna{picked ? `: ${picked.name.split(' ')[0]}` : ' (nova ficha)'}</Button>
             <Button variant="outline" onClick={() => decide('ex')} disabled={busy}><b className="mr-1">E</b> Ex-aluna{picked ? `: ${picked.name.split(' ')[0]}` : ''}</Button>
             <Button variant="ghost" onClick={() => decide('nao')} disabled={busy}><b className="mr-1">N</b> Não é lead</Button>

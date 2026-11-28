@@ -14,7 +14,7 @@ export { deepClean };
 export type Col =
   | 'clients' | 'products' | 'plans' | 'sales' | 'channels' | 'goals' | 'members' | 'audit' | 'offers'
   | 'influencers' | 'commissionModels' | 'influencerMonths' | 'ambassadors'
-  | 'okrs' | 'activities' | 'journal' | 'campaigns' | 'knowledge' | 'assessments' | 'checkouts' | 'orders' | 'coupons' | 'leads';
+  | 'okrs' | 'activities' | 'journal' | 'campaigns' | 'knowledge' | 'assessments' | 'checkouts' | 'orders' | 'coupons' | 'leads' | 'clicks';
 
 export const colRef = (tenantId: string, c: Col) => collection(db, 'tenants', tenantId, c);
 export const docRef = (tenantId: string, c: Col, id: string) => doc(db, 'tenants', tenantId, c, id);

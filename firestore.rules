@@ -38,6 +38,14 @@ service cloud.firestore {
       allow delete: if owner(resource.data.tenantId) || (signedIn() && email() == inviteEmail);
     }
 
+    // Links rastreados (/r/?l=slug): públicos para quem clica; só o dono da consultoria grava
+    match /go/{slug} {
+      allow get: if resource.data.active == true || active(resource.data.tenantId);
+      allow list: if false;
+      allow create: if owner(request.resource.data.tenantId);
+      allow update, delete: if owner(resource.data.tenantId) && (!('tenantId' in request.resource.data) || request.resource.data.tenantId == resource.data.tenantId);
+    }
+
     match /tenants/{t} {
       allow read: if active(t);
       allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
@@ -119,6 +127,19 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linkUrl', 'ret', 'status', 'updatedAt'])
           && request.resource.data.status in ['aguardando', 'retornou']
         );
+        allow delete: if owner(t);
+      }
+
+      // Cliques nos links rastreados: quem clica (sem login) só cria um registro mínimo; ninguém de fora lê
+      match /clicks/{id} {
+        function go() { return get(/databases/$(database)/documents/go/$(request.resource.data.slug)).data; }
+        allow read: if active(t);
+        allow create: if request.resource.data.keys().hasOnly(['slug', 'originId', 'day', 'at'])
+          && request.resource.data.slug is string && request.resource.data.slug.size() <= 60
+          && request.resource.data.day is string && request.resource.data.day.size() == 10
+          && request.resource.data.at is int
+          && go().tenantId == t && go().active == true && go().originId == request.resource.data.originId;
+        allow update: if false;
         allow delete: if owner(t);
       }
 
