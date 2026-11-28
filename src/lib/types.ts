@@ -89,6 +89,8 @@ export interface Client {
   outcome?: import('./retention').RenewalOutcome;
   /** Recall (winning back) de ex-aluna */
   recall?: import('./retention').Recall;
+  /** Bônus de tempo dados (sem venda) */
+  bonuses?: import('./retention').Bonus[];
   deleted?: boolean;
   deletedAt?: number;
   createdAt: number;

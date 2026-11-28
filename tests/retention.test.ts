@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { currentOutcome, recallList, recallMessage, renewalBoard, suggestedRecall, type RClient } from '../src/lib/retention';
+import { activeBonus, bonusState, bonusSummary, currentOutcome, recallList, recallMessage, renewalBoard, suggestedRecall, type RClient } from '../src/lib/retention';
 import type { Sale } from '../src/lib/types';
 
 const base = { createdAt: 0, updatedAt: 0 };
@@ -60,5 +60,27 @@ describe('retenção', () => {
   it('mensagem muda com o motivo', () => {
     expect(recallMessage('Ana', 'financeiro')).toContain('financeira');
     expect(recallMessage('Ana')).toContain('Oi, Ana!');
+  });
+});
+
+describe('bônus de tempo', () => {
+  const bonus = { months: 3, from: '2026-11-20', to: '2027-02-20', reason: 'Financeiro: volta a pagar em breve', at: '2026-11-27' };
+  const sab = { id: 's', name: 'Sabrina', status: 'ativo', endDate: '2027-02-20', bonuses: [bonus] } as unknown as RClient;
+  it('fica à parte no mês do vencimento antigo e não conta como renovação nem perda', () => {
+    const b = renewalBoard([sab], [], 2026, 11, '2026-11-27');
+    expect(b.bonificadas.map((r) => r.state)).toEqual(['em_bonus']);
+    expect(b.renovadas.length + b.perdidas.length + b.aVencer.length).toBe(0);
+  });
+  it('volta para a renovar no fim do bônus, com o bônus à vista', () => {
+    const b = renewalBoard([sab], [], 2027, 2, '2027-02-10');
+    expect(b.aVencer[0].bonus?.reason).toBe(bonus.reason);
+  });
+  it('mede quantas renovaram pagando depois', () => {
+    expect(activeBonus(sab)).toBe(bonus);
+    expect(bonusState({ ...sab, endDate: '2028-02-20' }, bonus, '2027-03-01')).toBe('renovou');
+    expect(bonusState(sab, bonus, '2027-03-01')).toBe('a_decidir');
+    expect(bonusState({ ...sab, status: 'inativo' } as RClient, bonus, '2027-03-01')).toBe('saiu');
+    const s = bonusSummary([{ ...sab, endDate: '2028-02-20' } as RClient], '2027-03-01');
+    expect([s.total, s.ended, s.renewed, s.conversion]).toEqual([1, 1, 1, 1]);
   });
 });

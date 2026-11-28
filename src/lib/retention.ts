@@ -1,7 +1,7 @@
 // Retenção: o que acontece com quem vence o plano (renova, negocia, pausa ou sai) e a fila de recall.
 // Funções puras, testadas em tests/retention.test.ts.
 import type { Client, Sale } from './types';
-import { addDays, countable, daysBetween, monthBounds, saleKind } from './calc';
+import { addDays, addMonths, countable, daysBetween, monthBounds, saleKind } from './calc';
 
 export type ChurnReason =
   | 'financeiro' | 'inadimplencia' | 'rotina' | 'resultado' | 'atendimento' | 'saude' | 'outro_profissional' | 'sozinha' | 'sem_resposta' | 'outro';
@@ -46,7 +46,66 @@ export interface Recall {
   notes?: string;
 }
 
-export type RClient = Client & { outcome?: RenewalOutcome; recall?: Recall };
+/** Bônus de tempo: estende o vencimento sem venda (não conta como renovação nem faturamento) */
+export interface Bonus {
+  months: number;
+  /** Vencimento antes do bônus */
+  from: string;
+  /** Vencimento depois do bônus */
+  to: string;
+  reason: string;
+  note?: string;
+  at: string;
+  byName?: string;
+}
+export const BONUS_REASONS = [
+  'Financeiro: volta a pagar em breve',
+  'Ótimo resultado / reconhecimento',
+  'Saúde, gestação ou lesão',
+  'Compensação por falha nossa',
+  'Embaixadora / indicações',
+  'Outro',
+];
+
+export type RClient = Client & { outcome?: RenewalOutcome; recall?: Recall; bonuses?: Bonus[] };
+
+/** Novo vencimento com o bônus (conta a partir do vencimento atual) */
+export function bonusEnd(endDate: string, months: number): string {
+  return addMonths(endDate, months);
+}
+
+/** Bônus que está valendo agora: o último, se o vencimento ainda é o dele */
+export function activeBonus(c: RClient): Bonus | undefined {
+  const b = c.bonuses?.[c.bonuses.length - 1];
+  return b && b.to === c.endDate ? b : undefined;
+}
+
+export type BonusState = 'em_bonus' | 'renovou' | 'saiu' | 'a_decidir';
+export const BONUS_STATE_LABEL: Record<BonusState, string> = { em_bonus: 'Em bônus', renovou: 'Renovou pagando', saiu: 'Não renovou', a_decidir: 'Bônus acabou, sem decisão' };
+
+/** O que aconteceu depois do bônus */
+export function bonusState(c: RClient, b: Bonus, today: string): BonusState {
+  if (c.endDate && c.endDate > b.to) return 'renovou';
+  if (b.to >= today) return 'em_bonus';
+  const o = currentOutcome(c);
+  if (c.status !== 'ativo' || o?.status === 'nao_renovou' || o?.status === 'pausa') return 'saiu';
+  return 'a_decidir';
+}
+
+export interface BonusRow { client: RClient; bonus: Bonus; state: BonusState }
+
+/** Todos os bônus dados (mais recentes primeiro) e quantos viraram renovação paga */
+export function bonusSummary(clients: RClient[], today: string) {
+  const rows: BonusRow[] = [];
+  for (const c of clients) {
+    if (c.deleted || c.isTest) continue;
+    for (const b of c.bonuses ?? []) rows.push({ client: c, bonus: b, state: bonusState(c, b, today) });
+  }
+  rows.sort((a, b) => (a.bonus.at < b.bonus.at ? 1 : -1));
+  const ended = rows.filter((r) => r.state !== 'em_bonus');
+  const renewed = rows.filter((r) => r.state === 'renovou').length;
+  return { rows, total: rows.length, emBonus: rows.length - ended.length, ended: ended.length, renewed, conversion: ended.length ? renewed / ended.length : null };
+}
 
 /** Dias de tolerância depois do vencimento até exigir uma decisão */
 export const GRACE_DAYS = 7;
@@ -56,13 +115,13 @@ export function currentOutcome(c: RClient): RenewalOutcome | undefined {
   return c.outcome && (c.outcome.cycleEnd === c.endDate || !c.endDate) ? c.outcome : undefined;
 }
 
-export interface BoardRow { client: RClient; daysLeft: number; outcome?: RenewalOutcome }
+export interface BoardRow { client: RClient; daysLeft: number; outcome?: RenewalOutcome; bonus?: Bonus }
 
 /** Painel de renovações do mês: quem vence, o que aconteceu com cada uma e os números */
 export function renewalBoard(clients: RClient[], sales: Sale[], y: number, m: number, today: string, grace = GRACE_DAYS) {
   const { start, end } = monthBounds(y, m);
   const due = clients.filter((c) => !c.deleted && !c.isTest && c.endDate && c.endDate >= start && c.endDate <= end);
-  const row = (c: RClient): BoardRow => ({ client: c, daysLeft: daysBetween(today, c.endDate!), outcome: currentOutcome(c) });
+  const row = (c: RClient): BoardRow => ({ client: c, daysLeft: daysBetween(today, c.endDate!), outcome: currentOutcome(c), bonus: activeBonus(c) });
   const rows = due.map(row).sort((a, b) => (a.client.endDate! < b.client.endDate! ? -1 : 1));
 
   const aVencer: BoardRow[] = [];
@@ -77,6 +136,12 @@ export function renewalBoard(clients: RClient[], sales: Sale[], y: number, m: nu
     else if (r.daysLeft >= 0) aVencer.push(r);
     else semDecisao.push(r);
   }
+  // ganharam bônus num vencimento deste mês: não renovaram pagando nem saíram, ficam à parte
+  const bonificadas: BonusRow[] = [];
+  for (const c of clients) {
+    if (c.deleted || c.isTest) continue;
+    for (const bn of c.bonuses ?? []) if (bn.from >= start && bn.from <= end) bonificadas.push({ client: c, bonus: bn, state: bonusState(c, bn, today) });
+  }
   const renovadas = sales
     .filter((s) => countable(s) && saleKind(s) === 'renovacao' && s.date >= start && s.date <= end)
     .sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -89,7 +154,7 @@ export function renewalBoard(clients: RClient[], sales: Sale[], y: number, m: nu
   const lastValue = (rs: BoardRow[]) => rs.reduce((a, r) => a + (r.client.lastValue ?? 0), 0);
   const total = renovadas.length + perdidas.length + aVencer.length + semDecisao.length + negociando.length;
   return {
-    aVencer, semDecisao, negociando, perdidas, renovadas,
+    aVencer, semDecisao, negociando, perdidas, renovadas, bonificadas,
     /** passaram do prazo de tolerância sem decisão: precisam de atenção */
     atrasadas: semDecisao.filter((r) => -r.daysLeft > grace),
     renovadasValor: renovadas.reduce((a, s) => a + s.gross, 0),

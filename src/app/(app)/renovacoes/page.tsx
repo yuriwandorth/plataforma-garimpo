@@ -4,15 +4,18 @@ import { where } from 'firebase/firestore';
 import { useCollection } from '@/lib/db';
 import { useClients } from '@/lib/hooks';
 import { fmtBRL, fmtDate, fmtPct, monthBounds, MONTHS, parts, todayISO } from '@/lib/calc';
-import { CHURN_REASONS, GRACE_DAYS, OUTCOME_LABEL, renewalBoard, type BoardRow, type RClient } from '@/lib/retention';
+import { BONUS_STATE_LABEL, bonusSummary, CHURN_REASONS, GRACE_DAYS, OUTCOME_LABEL, renewalBoard, type BoardRow, type BonusState, type RClient } from '@/lib/retention';
 import type { Sale } from '@/lib/types';
 import { Badge, Button, Card, Empty, ErrorNote, PageHeader, Progress, Spinner, Stat, Tabs } from '@/components/ui';
 import { MonthPicker } from '@/components/MonthPicker';
 import { ClientModal } from '@/components/ClientModal';
 import { SaleForm } from '@/components/SaleForm';
 import { OutcomeModal } from '@/components/OutcomeModal';
+import { BonusModal } from '@/components/BonusModal';
 
-type Tab = 'renovar' | 'negociando' | 'perdidas' | 'renovadas';
+type Tab = 'renovar' | 'negociando' | 'perdidas' | 'renovadas' | 'bonus';
+
+const STATE_TONE: Record<BonusState, 'good' | 'warn' | 'bad' | 'mute'> = { em_bonus: 'mute', renovou: 'good', saiu: 'bad', a_decidir: 'warn' };
 
 function whatsLink(c: RClient, text: string) {
   const phone = (c.phone ?? '').replace(/\D/g, '');
@@ -39,14 +42,17 @@ export default function RenovacoesPage() {
   const [renew, setRenew] = useState<RClient | null>(null);
   const [back, setBack] = useState<RClient | null>(null);
   const [decide, setDecide] = useState<RClient | null>(null);
+  const [bonus, setBonus] = useState<RClient | null>(null);
 
   const all = clients.data as RClient[];
   const b = useMemo(() => renewalBoard(all, sales.data, ym.y, ym.m, today), [all, sales.data, ym, today]);
+  const bs = useMemo(() => bonusSummary(all, today), [all, today]);
   const s = q.trim().toLowerCase();
   const match = (r: BoardRow) => !s || r.client.name.toLowerCase().includes(s) || (r.client.email ?? '').includes(s) || (r.client.planName ?? '').toLowerCase().includes(s);
   const monthName = `${MONTHS[ym.m - 1]} de ${ym.y}`;
   const pend = b.aVencer.length + b.semDecisao.length;
   const live = (c: RClient) => (clients.byId[c.id] as RClient) ?? c;
+  const bonusOf = (c: RClient) => { const x = c.bonuses?.[c.bonuses.length - 1]; return x && x.to === c.endDate ? x : undefined; };
 
   const actions = (c: RClient, withDecide = true) => {
     const first = c.name.split(' ')[0];
@@ -56,6 +62,7 @@ export default function RenovacoesPage() {
       <div className="flex flex-wrap justify-end gap-2">
         {link && <a href={link} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-lg border border-line px-2.5 py-1.5 text-xs hover:border-gold/60">WhatsApp</a>}
         <Button size="sm" onClick={() => setRenew(c)}>Renovou</Button>
+        {withDecide && <Button size="sm" variant="outline" onClick={() => setBonus(c)}>Dar bônus</Button>}
         {withDecide && <Button size="sm" variant="outline" onClick={() => setDecide(c)}>Registrar destino</Button>}
       </div>
     );
@@ -63,7 +70,8 @@ export default function RenovacoesPage() {
 
   const nameCell = (c: RClient) => (
     <td className="td"><button className="text-left font-medium hover:underline" onClick={() => setOpen(c)}>{c.name}</button>
-      <div className="text-xs text-mute">{c.planName} · {fmtBRL(c.lastValue ?? 0)}</div></td>
+      <div className="text-xs text-mute">{c.planName} · {fmtBRL(c.lastValue ?? 0)}</div>
+      {bonusOf(c) && <div className="mt-1 text-xs"><Badge tone="warn">Em bônus</Badge> <span className="text-mute">{bonusOf(c)!.months}m · {bonusOf(c)!.reason}{bonusOf(c)!.note ? ` · ${bonusOf(c)!.note}` : ''}</span></div>}</td>
   );
 
   return (
@@ -92,6 +100,7 @@ export default function RenovacoesPage() {
         { id: 'negociando', label: `Em negociação (${b.negociando.length})` },
         { id: 'perdidas', label: `Não renovaram (${b.perdidas.length})` },
         { id: 'renovadas', label: `Renovadas (${b.renovadas.length})` },
+        { id: 'bonus', label: `Bônus (${b.bonificadas.length})` },
       ]} />
       <input className="input mb-4 max-w-sm" placeholder="Pesquisar por nome, e-mail ou plano" value={q} onChange={(e) => setQ(e.target.value)} />
 
@@ -132,6 +141,42 @@ export default function RenovacoesPage() {
             </table>
           </div>
         )
+      ) : tab === 'bonus' ? (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            {b.bonificadas.length === 0 ? <Empty title={`Nenhum bônus em vencimentos de ${monthName}`} text="Use 'Dar bônus' em quem vai vencer: o vencimento é estendido sem venda e ela volta para cá quando o bônus acabar." /> : (
+              <div className="card overflow-x-auto">
+                <table className="w-full">
+                  <thead><tr className="border-b border-line"><th className="th">Aluna</th><th className="th">Bônus</th><th className="th">Motivo</th><th className="th">Novo vencimento</th><th className="th">Depois do bônus</th></tr></thead>
+                  <tbody>
+                    {b.bonificadas.filter((r) => match({ client: r.client, daysLeft: 0 })).map((r) => (
+                      <tr key={r.client.id + r.bonus.at + r.bonus.to} className="border-b border-line/60">
+                        <td className="td"><button className="text-left font-medium hover:underline" onClick={() => setOpen(r.client)}>{r.client.name}</button>
+                          <div className="text-xs text-mute">vencia em {fmtDate(r.bonus.from)}</div></td>
+                        <td className="td">{r.bonus.months} {r.bonus.months > 1 ? 'meses' : 'mês'}<div className="text-xs text-mute">dado em {fmtDate(r.bonus.at)}{r.bonus.byName ? ` por ${r.bonus.byName.split(' ')[0]}` : ''}</div></td>
+                        <td className="td max-w-[16rem] text-xs">{r.bonus.reason}{r.bonus.note && <div className="text-mute">{r.bonus.note}</div>}</td>
+                        <td className="td">{fmtDate(r.bonus.to)}</td>
+                        <td className="td"><Badge tone={STATE_TONE[r.state]}>{BONUS_STATE_LABEL[r.state]}</Badge></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <Card title="Bônus valem a pena?">
+            {bs.total === 0 ? <p className="text-sm text-mute">Nenhum bônus dado ainda.</p> : (
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between"><span>Bônus dados</span><b>{bs.total}</b></div>
+                <div className="flex justify-between"><span>Ainda em bônus</span><b>{bs.emBonus}</b></div>
+                <div className="flex justify-between"><span>Acabaram</span><b>{bs.ended}</b></div>
+                <div className="flex justify-between"><span>Renovaram pagando depois</span><b>{bs.renewed}</b></div>
+                <div className="pt-1"><div className="mb-1 flex justify-between text-xs text-mute"><span>Conversão do bônus</span><span>{fmtPct(bs.conversion)}</span></div><Progress value={bs.conversion ?? 0} tone="good" /></div>
+                <p className="pt-1 text-xs text-mute">Bônus não conta como renovação nem como faturamento. Quando acaba, a aluna volta para "A renovar" com o motivo à vista.</p>
+              </div>
+            )}
+          </Card>
+        </div>
       ) : tab === 'perdidas' ? (
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="lg:col-span-2">
@@ -201,6 +246,7 @@ export default function RenovacoesPage() {
       {renew && <SaleForm open onClose={() => setRenew(null)} client={live(renew)} initialKind="renovacao" />}
       {back && <SaleForm open onClose={() => setBack(null)} client={live(back)} initialKind="nova" initialChannelId="winning-back" />}
       {decide && <OutcomeModal client={live(decide)} onClose={() => setDecide(null)} />}
+      {bonus && <BonusModal client={live(bonus)} onClose={() => setBonus(null)} />}
     </div>
   );
 }

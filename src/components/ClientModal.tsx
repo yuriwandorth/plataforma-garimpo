@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { OutcomeModal } from './OutcomeModal';
-import { currentOutcome, type RClient } from '@/lib/retention';
+import { BonusModal } from './BonusModal';
+import { activeBonus, currentOutcome, type RClient } from '@/lib/retention';
 import { where } from 'firebase/firestore';
 import { useCollection, useWriter } from '@/lib/db';
 import { useChannels, useClients, useInfluencers, useMembers } from '@/lib/hooks';
@@ -39,6 +40,7 @@ export function ClientModal({ open, onClose, client, initialDraft }: {
   const [saleOpen, setSaleOpen] = useState(false);
   const [saleKindOpen, setSaleKindOpen] = useState<SaleKind | undefined>();
   const [exitOpen, setExitOpen] = useState(false);
+  const [bonusOpen, setBonusOpen] = useState(false);
   const isNew = !client;
 
   useEffect(() => {
@@ -92,7 +94,7 @@ export function ClientModal({ open, onClose, client, initialDraft }: {
   return (
     <>
       <Modal
-        open={open && !saleOpen && !exitOpen}
+        open={open && !saleOpen && !exitOpen && !bonusOpen}
         onClose={onClose}
         wide
         title={isNew ? 'Adicionar cliente' : client!.name}
@@ -100,6 +102,7 @@ export function ClientModal({ open, onClose, client, initialDraft }: {
         footer={
           <>
             {!isNew && profile?.role === 'owner' && !client!.deleted && <Button variant="danger" className="mr-auto" onClick={remove}>Excluir cliente</Button>}
+            {!isNew && !client!.deleted && <Button variant="outline" onClick={() => setBonusOpen(true)}>{activeBonus(client as RClient) ? 'Em bônus' : 'Dar bônus'}</Button>}
             {!isNew && !client!.deleted && <Button variant="outline" onClick={() => setExitOpen(true)}>{currentOutcome(client as RClient) ? 'Destino / saída' : 'Registrar saída'}</Button>}
             <Button variant="ghost" onClick={onClose}>Fechar</Button>
             {tab === 'cadastro' && <Button onClick={save} disabled={busy}>{busy ? 'Salvando…' : 'Salvar cliente'}</Button>}
@@ -220,6 +223,7 @@ export function ClientModal({ open, onClose, client, initialDraft }: {
         )}
         {err && <p className="mt-3 text-sm text-bad">{err}</p>}
       </Modal>
+      {client && bonusOpen && <BonusModal client={client as RClient} onClose={() => setBonusOpen(false)} />}
       {client && exitOpen && <OutcomeModal client={{ ...(client as RClient), endDate: client.endDate || todayISO() }} onClose={() => setExitOpen(false)} />}
       {client && <SaleForm open={saleOpen} onClose={() => setSaleOpen(false)} client={client} clientSales={mySales} initialKind={saleKindOpen} />}
     </>
