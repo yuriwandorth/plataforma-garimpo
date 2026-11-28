@@ -3,15 +3,36 @@
 import type { Client, Sale } from './types';
 import { countable, daysBetween } from './calc';
 
-export type LeadStage = 'novo' | 'em_contato' | 'negociando' | 'convertido' | 'perdido' | 'nao_lead';
+export type LeadStage = 'novo' | 'em_contato' | 'interesse' | 'apresentacao' | 'negociando' | 'link_enviado' | 'convertido' | 'perdido' | 'nao_lead';
 export const LEAD_STAGES: Record<LeadStage, { label: string; tone: 'mute' | 'gold' | 'warn' | 'good' | 'bad' }> = {
-  novo: { label: 'Novo', tone: 'mute' },
-  em_contato: { label: 'Em contato', tone: 'gold' },
-  negociando: { label: 'Negociando', tone: 'warn' },
+  novo: { label: 'Sem contato', tone: 'mute' },
+  em_contato: { label: 'Contato feito', tone: 'gold' },
+  interesse: { label: 'Interesse identificado', tone: 'gold' },
+  apresentacao: { label: 'Apresentação da consultoria', tone: 'gold' },
+  negociando: { label: 'Negociação', tone: 'warn' },
+  link_enviado: { label: 'Link de pagamento enviado', tone: 'warn' },
   convertido: { label: 'Virou aluna', tone: 'good' },
   perdido: { label: 'Perdido', tone: 'bad' },
   nao_lead: { label: 'Não é lead', tone: 'mute' },
 };
+
+/** Etapas do funil (colunas do quadro), na ordem */
+export const FUNNEL: LeadStage[] = ['novo', 'em_contato', 'interesse', 'apresentacao', 'negociando', 'link_enviado', 'convertido', 'perdido'];
+
+/** Etapas da Leadfy → etapas da plataforma */
+export const LEADFY_STAGE: Record<string, LeadStage> = {
+  'Sem Contato': 'novo', 'Contato Feito': 'em_contato', 'Identificação de Interesse': 'interesse', 'Apresentação de Consultoria': 'apresentacao',
+  'Negociação': 'negociando', 'Link de Pagamento Enviado': 'link_enviado', 'Pago': 'convertido', 'Blacklist': 'perdido',
+};
+
+/** Avança a etapa só para frente (importação não "desfaz" progresso); perdido/convertido sempre valem */
+export function furtherStage(cur: LeadStage, next: LeadStage): LeadStage {
+  if (next === cur) return cur;
+  if (cur === 'convertido' || cur === 'nao_lead') return cur;
+  if (next === 'convertido' || next === 'perdido') return next;
+  if (cur === 'perdido') return cur;
+  return FUNNEL.indexOf(next) > FUNNEL.indexOf(cur) ? next : cur;
+}
 
 export interface Lead {
   id: string;
@@ -38,6 +59,8 @@ export interface Lead {
   channelId?: string;
   /** Influencer que trouxe o lead (cupom, link ou marcação manual) */
   influencerId?: string;
+  /** Origem rastreada (link da bio, stories, campanha, influencer…) */
+  origin?: string;
   notes?: string;
   lostReason?: string;
   clientId?: string;

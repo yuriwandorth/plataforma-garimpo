@@ -263,3 +263,52 @@ export const DEFAULT_TACTICS: Tactic[] = [
   { title: 'Oferta clara', text: 'Uma condição só, com prazo e motivo.' },
   { title: 'Lembrete de prazo', text: 'Avise 48 h e 24 h antes de encerrar.' },
 ];
+
+// ---------------- Origens rastreadas (links da bio, stories, campanhas, influencers) ----------------
+export type OriginKind = 'influencer' | 'embaixadora' | 'bio' | 'stories' | 'campanha' | 'outro';
+export const ORIGIN_KIND: Record<OriginKind, string> = {
+  influencer: 'Influencer', embaixadora: 'Embaixadora', bio: 'Link da bio', stories: 'Stories', campanha: 'Campanha', outro: 'Outro',
+};
+/** Guardada em tenants/{t}.origins */
+export interface TrackedOrigin {
+  id: string;
+  name: string;
+  kind: OriginKind;
+  /** Link rastreado (hoje da Leadfy) */
+  url?: string;
+  network?: string;
+  campaign?: string;
+  influencerId?: string;
+  description?: string;
+  /** De onde veio o cadastro (ex.: leadfy) */
+  source?: string;
+}
+
+/** Tipo provável pelo nome da origem */
+export function originKind(name: string, campaign?: string): OriginKind {
+  const n = name.toLowerCase();
+  if (/embaixador/.test(n)) return 'embaixadora';
+  if (/\bbio\b/.test(n)) return 'bio';
+  if (/stor(y|ies)/.test(n)) return 'stories';
+  if (campaign || /bk\d|black|campanha/.test(n)) return 'campanha';
+  return 'influencer';
+}
+
+/** Sugere cupom para quem ainda não tem: PRIMEIRONOME10 (com o sobrenome se já existir) */
+export function suggestCoupons(infs: Pick<Influencer, 'id' | 'name' | 'coupon' | 'couponPct'>[]): { id: string; coupon: string }[] {
+  const clean = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const used = new Set(infs.map((i) => clean(i.coupon ?? '')).filter(Boolean));
+  const out: { id: string; coupon: string }[] = [];
+  for (const i of infs) {
+    if (i.coupon) continue;
+    const pct = Math.round(Number(i.couponPct) || 10);
+    const words = i.name.trim().split(/\s+/).map(clean).filter(Boolean);
+    if (!words.length) continue;
+    const tries = [words[0], words.length > 1 ? words[0] + words[words.length - 1][0] : '', words.join('')].filter(Boolean).map((w) => `${w}${pct}`);
+    let code = tries.find((c) => !used.has(c));
+    for (let n = 2; !code; n++) if (!used.has(`${words[0]}${pct}${n}`)) code = `${words[0]}${pct}${n}`;
+    used.add(code);
+    out.push({ id: i.id, coupon: code });
+  }
+  return out;
+}

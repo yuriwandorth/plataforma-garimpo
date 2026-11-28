@@ -4,13 +4,16 @@ import { useMemo, useState } from 'react';
 import { useCollection, useWriter } from '@/lib/db';
 import { download, useChannels, useClients, useInfluencers } from '@/lib/hooks';
 import { fmtDate, fmtPct, toCSV, todayISO } from '@/lib/calc';
-import { FUP_LABEL, isConverted, LEAD_STAGES, leadBoard, nextFollowUp, type Lead, type LeadStage, type LeadView } from '@/lib/leads';
+import { FUNNEL, FUP_LABEL, isConverted, LEAD_STAGES, leadBoard, nextFollowUp, type Lead, type LeadStage, type LeadView } from '@/lib/leads';
 import type { Client, Sale } from '@/lib/types';
 import { Badge, Button, Card, Empty, ErrorNote, Field, Modal, PageHeader, Progress, Spinner, Stat, Tabs } from '@/components/ui';
 import { SaleForm } from '@/components/SaleForm';
 import { ClientModal } from '@/components/ClientModal';
+import { Board } from '@/components/Board';
+import { useSession } from '@/lib/auth';
 
-type Tab = 'chamar' | 'abertos' | 'convertidos' | 'perdidos' | 'todos';
+type Tab = 'chamar' | 'funil' | 'abertos' | 'convertidos' | 'perdidos' | 'todos';
+const COL_LIMIT = 40;
 const PAGE = 100;
 
 const wa = (phone?: string) => {
@@ -40,6 +43,8 @@ export default function LeadsPage() {
   const [sell, setSell] = useState<Client | null>(null);
   const [openClient, setOpenClient] = useState<Client | null>(null);
   const [err, setErr] = useState('');
+  const [drag, setDrag] = useState<string | null>(null);
+  const infs = useInfluencers();
 
   const b = useMemo(() => leadBoard(leads.data, clients.data, sales.data), [leads.data, clients.data, sales.data]);
   const s = q.trim().toLowerCase();
@@ -47,7 +52,7 @@ export default function LeadsPage() {
   const fup = (v: LeadView) => (isConverted(v) ? null : nextFollowUp(v.lead, today));
   const due = b.views.filter((v) => { const f = fup(v); return f?.at && f.at <= today; });
   const filtered = (tab === 'chamar' ? due : b.views)
-    .filter((v) => tab === 'chamar' || tab === 'todos' || (tab === 'convertidos' ? isConverted(v) : tab === 'perdidos' ? !isConverted(v) && v.lead.stage === 'perdido' : !isConverted(v) && v.lead.stage !== 'perdido'))
+    .filter((v) => tab === 'chamar' || tab === 'todos' || tab === 'funil' || (tab === 'convertidos' ? isConverted(v) : tab === 'perdidos' ? !isConverted(v) && v.lead.stage === 'perdido' : !isConverted(v) && v.lead.stage !== 'perdido'))
     .filter((v) => !list || (v.lead.list ?? 'Sem lista') === list || (v.lead.tags ?? []).includes(list))
     .filter((v) => !s || v.lead.name.toLowerCase().includes(s) || (v.lead.email ?? '').includes(s) || (digits.length >= 4 && (v.lead.phone ?? '').includes(digits)))
     .sort((a, b2) => tab === 'chamar'
@@ -56,6 +61,10 @@ export default function LeadsPage() {
   const notLeads = leads.data.filter((l) => !l.deleted && l.stage === 'nao_lead').length;
   async function contacted(l: Lead) {
     await w.update<Lead>('leads', l.id, { lastContactAt: today, lastFromMe: true, followUpAt: undefined, stage: l.stage === 'novo' ? 'em_contato' : l.stage }, `Contato com lead: ${l.name}`);
+  }
+  async function moveTo(l: Lead, stage: LeadStage) {
+    if (l.stage === stage) return;
+    await w.update<Lead>('leads', l.id, { stage, ...(stage !== 'perdido' ? { lostReason: undefined } : {}) }, `Lead ${l.name} movido para ${LEAD_STAGES[stage].label}`);
   }
   const lists = [...new Set(b.views.flatMap((v) => [v.lead.list ?? 'Sem lista', ...(v.lead.tags ?? [])]))].sort();
 
@@ -111,6 +120,7 @@ export default function LeadsPage() {
 
       <Tabs value={tab} onChange={(t) => { setTab(t); setLimit(PAGE); }} items={[
         { id: 'chamar', label: `Para chamar hoje (${due.length})` },
+        { id: 'funil', label: 'Funil' },
         { id: 'abertos', label: `Em aberto (${b.open})` },
         { id: 'convertidos', label: `Viraram alunas (${b.converted})` },
         { id: 'perdidos', label: `Perdidos (${b.lost})` },
@@ -125,7 +135,38 @@ export default function LeadsPage() {
       </div>
 
       {notLeads > 0 && <p className="mb-2 text-xs text-mute">{notLeads} contato(s) marcados como "não é lead" ficam fora das contas. Para rever, abra a Triagem.</p>}
-      {leads.loading || clients.loading ? <Spinner /> : filtered.length === 0 ? (
+      {tab === 'funil' && !leads.loading && !clients.loading ? (
+        <Board>
+          {FUNNEL.map((st) => {
+            const col = filtered.filter((v) => (isConverted(v) ? 'convertido' : v.lead.stage) === st);
+            return (
+              <div key={st} onDragOver={(e) => e.preventDefault()} onDrop={() => { const v = b.views.find((x) => x.lead.id === drag); if (v) moveTo(v.lead, st); setDrag(null); }}
+                className={`flex w-64 shrink-0 flex-col rounded-xl border bg-bg/40 p-2 ${drag ? 'border-dashed border-gold/60' : 'border-line'}`}>
+                <div className="mb-2 flex items-center justify-between px-1"><span className="text-xs font-semibold uppercase tracking-wide">{LEAD_STAGES[st].label}</span><Badge tone={LEAD_STAGES[st].tone}>{col.length}</Badge></div>
+                <div className="flex flex-col gap-2">
+                  {col.slice(0, COL_LIMIT).map((v) => {
+                    const l = v.lead;
+                    const inf = l.influencerId ? infs.byId[l.influencerId] : undefined;
+                    return (
+                      <div key={l.id} draggable onDragStart={() => setDrag(l.id)} onDragEnd={() => setDrag(null)}
+                        className="cursor-grab rounded-lg border border-line bg-panel p-2.5 text-sm hover:border-gold/50 active:cursor-grabbing">
+                        <button type="button" className="block w-full truncate text-left font-medium hover:underline" onClick={() => setEdit(l)}>{l.name || fmtPhone(l.phone)}</button>
+                        <div className="truncate text-xs text-mute">{fmtPhone(l.phone)}</div>
+                        {(l.origin || inf) && <div className="mt-1 flex flex-wrap gap-1">{l.origin && <Badge>{l.origin}</Badge>}{inf && <Badge tone="gold">{inf.name.split(' ')[0]}</Badge>}</div>}
+                        <div className="mt-1 text-xs text-mute">{l.lastContactAt ? `último contato ${fmtDate(l.lastContactAt)}` : l.firstSeenAt ? `entrou ${fmtDate(l.firstSeenAt)}` : ''}</div>
+                        <select className="mt-1.5 w-full rounded border border-line bg-bg px-1 py-0.5 text-xs" value={isConverted(v) ? 'convertido' : l.stage} onChange={(e) => moveTo(l, e.target.value as LeadStage)} aria-label="Mover para">
+                          {FUNNEL.map((x) => <option key={x} value={x}>{LEAD_STAGES[x].label}</option>)}
+                        </select>
+                      </div>
+                    );
+                  })}
+                  {col.length > COL_LIMIT && <p className="px-1 text-xs text-mute">e mais {col.length - COL_LIMIT}. Use a busca ou a lista para achar.</p>}
+                </div>
+              </div>
+            );
+          })}
+        </Board>
+      ) : leads.loading || clients.loading ? <Spinner /> : filtered.length === 0 ? (
         <Empty title={b.total ? 'Nenhum lead neste filtro' : 'Nenhum lead ainda'} text={b.total ? undefined : 'Importe uma planilha de contatos (ex.: exportação do Waspeed) ou adicione à mão.'} />
       ) : (
         <div className="card overflow-x-auto">
@@ -170,6 +211,8 @@ export default function LeadsPage() {
 function LeadModal({ lead, channels, onClose }: { lead?: Lead; channels: { id: string; name: string }[]; onClose: () => void }) {
   const w = useWriter();
   const influencers = useInfluencers();
+  const { tenant } = useSession();
+  const origins = tenant?.origins ?? [];
   const [f, setF] = useState<Partial<Lead>>(lead ?? { stage: 'novo', source: 'manual', firstSeenAt: todayISO() });
   const [err, setErr] = useState('');
   const set = <K extends keyof Lead>(k: K, v: Lead[K]) => setF((p) => ({ ...p, [k]: v }));
@@ -207,6 +250,12 @@ function LeadModal({ lead, channels, onClose }: { lead?: Lead; channels: { id: s
           <select className="input" value={f.influencerId ?? ''} onChange={(e) => { set('influencerId', e.target.value || undefined); if (e.target.value && !f.channelId) set('channelId', 'influencer'); }}>
             <option value="">—</option>
             {influencers.data.map((i) => <option key={i.id} value={i.id}>{i.name} (@{i.handle})</option>)}
+          </select>
+        </Field>
+        <Field label="Origem" hint="Link rastreado por onde chegou.">
+          <select className="input" value={f.origin ?? ''} onChange={(e) => { const o = origins.find((x) => x.name === e.target.value); set('origin', e.target.value || undefined); if (o?.influencerId && !f.influencerId) set('influencerId', o.influencerId); }}>
+            <option value="">—</option>
+            {origins.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
           </select>
         </Field>
         <Field label="Próximo follow-up" hint="Deixe vazio para a plataforma sugerir pela conversa."><input type="date" className="input" value={f.followUpAt ?? ''} onChange={(e) => set('followUpAt', e.target.value || undefined)} /></Field>

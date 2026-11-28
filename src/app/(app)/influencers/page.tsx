@@ -1,14 +1,15 @@
 'use client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { Board } from '@/components/Board';
 import { where } from 'firebase/firestore';
 import { useCollection, useWriter } from '@/lib/db';
 import { useInfluencers } from '@/lib/hooks';
 import { countable, fmtBRL, monthBounds, parts, todayISO } from '@/lib/calc';
-import { commissionFor, DEFAULT_TIERS, STAGES, trialDaysLeft, type CommissionModel, type Influencer, type InfluencerMonth, type InfluencerStage } from '@/lib/growth';
+import { commissionFor, DEFAULT_TIERS, STAGES, suggestCoupons, trialDaysLeft, type CommissionModel, type Influencer, type InfluencerMonth, type InfluencerStage } from '@/lib/growth';
 import type { Sale } from '@/lib/types';
 import type { Lead } from '@/lib/leads';
-import { Badge, Button, Card, cx, ErrorNote, PageHeader, Spinner, Stat, Tabs } from '@/components/ui';
+import { Badge, Button, Card, cx, ErrorNote, Modal, PageHeader, Spinner, Stat, Tabs } from '@/components/ui';
 import { MonthPicker } from '@/components/MonthPicker';
 import { CommissionModelsModal, InfluencerModal } from '@/components/InfluencerForms';
 import { syncInfluencerCoupon } from '@/lib/couponSync';
@@ -30,6 +31,21 @@ export default function InfluencersPage() {
     setCollapsed((c) => { const n = c.includes(id) ? c.filter((x) => x !== id) : [...c, id]; try { localStorage.setItem('funil-influencers', JSON.stringify(n)); } catch {} return n; });
   }
 
+  const missing = useMemo(() => suggestCoupons(inf.data.filter((i) => i.stage === 'fechado' || i.active)), [inf.data]);
+  const [genBusy, setGenBusy] = useState(false);
+  const [genOpen, setGenOpen] = useState(false);
+  async function genCoupons() {
+    if (!missing.length) return;
+    setGenBusy(true);
+    try {
+      for (const m of missing) {
+        const i = inf.byId[m.id];
+        await w.update<Influencer>('influencers', i.id, { coupon: m.coupon }, `Cupom ${m.coupon} gerado para ${i.name}`);
+        await syncInfluencerCoupon(w, { ...i, coupon: m.coupon }).catch(() => {});
+      }
+    } finally { setGenBusy(false); setGenOpen(false); }
+  }
+
   async function move(i: Influencer, stage: InfluencerStage) {
     if (i.stage === stage) return;
     if (stage === 'fechado' && !i.email) { setEdit({ ...i, stage }); return; }
@@ -40,8 +56,18 @@ export default function InfluencersPage() {
   return (
     <div>
       <PageHeader title="Influencers" subtitle="Prospecte no funil e acompanhe faturamento, comissão e entregas da permuta de quem já fechou."
-        actions={<><Button variant="outline" onClick={() => setModels(true)}>Modelos de comissão</Button><Button onClick={() => setAdd('prospectar')}>Adicionar influencer</Button></>} />
+        actions={<>{missing.length > 0 && <Button variant="outline" onClick={() => setGenOpen(true)}>{`Gerar cupons (${missing.length})`}</Button>}<Button variant="outline" onClick={() => setModels(true)}>Modelos de comissão</Button><Button onClick={() => setAdd('prospectar')}>Adicionar influencer</Button></>} />
       <ErrorNote error={inf.error} />
+      {genOpen && (
+        <Modal open onClose={() => setGenOpen(false)} title="Gerar cupons que faltam"
+          subtitle="Primeiro nome + % de desconto. Dá para renomear depois na ficha de cada uma; o cupom do checkout acompanha."
+          footer={<><Button variant="ghost" onClick={() => setGenOpen(false)}>Cancelar</Button><Button onClick={genCoupons} disabled={genBusy}>{genBusy ? 'Gerando…' : `Gerar ${missing.length} cupom(ns)`}</Button></>}>
+          <div className="divide-y divide-line/60 text-sm">
+            {missing.map((m) => <div key={m.id} className="flex justify-between py-1.5"><span>{inf.byId[m.id]?.name}</span><b className="font-mono">{m.coupon}</b></div>)}
+          </div>
+          <p className="mt-3 text-xs text-mute">O cupom só funciona no checkout para influencer com parceria fechada e ativa.</p>
+        </Modal>
+      )}
       <Tabs value={tab} onChange={setTab} items={[{ id: 'funil', label: 'Funil' }, { id: 'faturamento', label: 'Faturamento' }]} />
       {inf.loading ? <Spinner /> : tab === 'funil' ? (
         <Board>
@@ -156,40 +182,3 @@ function Revenue({ influencers }: { influencers: Influencer[] }) {
   );
 }
 
-/** Quadro com rolagem horizontal: barra fixa no topo (acompanha a tela) + setas laterais */
-function Board({ children }: { children: React.ReactNode }) {
-  const body = useRef<HTMLDivElement>(null);
-  const [m, setM] = useState({ max: 0, pos: 0 });
-  useEffect(() => {
-    const el = body.current;
-    if (!el) return;
-    const upd = () => {
-      const max = Math.max(0, el.scrollWidth - el.clientWidth), pos = el.scrollLeft;
-      setM((p) => (p.max === max && Math.abs(p.pos - pos) < 1 ? p : { max, pos }));
-    };
-    upd();
-    const ro = new ResizeObserver(upd);
-    ro.observe(el);
-    const mo = new MutationObserver(upd);
-    mo.observe(el, { childList: true, subtree: true });
-    el.addEventListener('scroll', upd);
-    window.addEventListener('resize', upd);
-    return () => { ro.disconnect(); mo.disconnect(); el.removeEventListener('scroll', upd); window.removeEventListener('resize', upd); };
-  }, []);
-  const go = (left: number, smooth = false) => body.current?.scrollTo({ left, behavior: smooth ? 'smooth' : 'auto' });
-  const l = m.pos > 4, r = m.pos < m.max - 4;
-  return (
-    <div className="relative">
-      {m.max > 0 && (
-        <div className="sticky top-14 z-20 mb-2 flex items-center gap-2 rounded-lg border border-line bg-panel/95 px-2 py-1.5 backdrop-blur lg:top-2">
-          <button type="button" onClick={() => go(m.pos - 300, true)} disabled={!l} className="rounded-md border border-line px-2 text-sm disabled:opacity-30" aria-label="Rolar para a esquerda">‹</button>
-          <input type="range" min={0} max={m.max} value={m.pos} onChange={(e) => go(Number(e.target.value))} aria-label="Rolar o quadro" className="h-2 flex-1 cursor-pointer accent-[rgb(var(--gold))]" />
-          <button type="button" onClick={() => go(m.pos + 300, true)} disabled={!r} className="rounded-md border border-line px-2 text-sm disabled:opacity-30" aria-label="Rolar para a direita">›</button>
-        </div>
-      )}
-      <div ref={body} className="flex items-start gap-3 overflow-x-auto pb-3">{children}</div>
-      {r && <button type="button" onClick={() => go(m.pos + 300, true)} className="fixed right-3 top-1/2 z-20 hidden h-10 w-10 -translate-y-1/2 rounded-full border border-line bg-panel shadow lg:block" aria-label="Rolar para a direita">›</button>}
-      {l && <button type="button" onClick={() => go(m.pos - 300, true)} className="fixed left-[15.5rem] top-1/2 z-20 hidden h-10 w-10 -translate-y-1/2 rounded-full border border-line bg-panel shadow lg:block" aria-label="Rolar para a esquerda">‹</button>}
-    </div>
-  );
-}

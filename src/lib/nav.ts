@@ -10,6 +10,7 @@ export const NAV: { group: string; items: { href: string; label: string; owner?:
   ] },
   { group: 'Comercial', items: [
     { href: '/leads/', label: 'Leads' },
+    { href: '/origens/', label: 'Origens e links' },
     { href: '/vendas/', label: 'Vendas' },
     { href: '/pedidos/', label: 'Checkout e pedidos' },
     { href: '/metas/', label: 'Metas por canal' },

@@ -1,10 +1,10 @@
 // Importação em massa (ex.: dados da Kairós): planeja o que é novo e o que já existe, sem duplicar.
 // Função pura testada em tests/importer.test.ts; a página /importar só grava o plano.
 import type { ChannelGoal, Client, ClientStatus, PaymentMethod, Period, Plan, Sale, SaleKind } from './types';
-import type { Campaign, Influencer } from './growth';
+import { originKind, type Campaign, type Influencer, type OriginKind, type TrackedOrigin } from './growth';
 import type { Okr } from './manage';
 import { planEndDate } from './calc';
-import { matchClient, phoneKey, type Lead, type LeadStage } from './leads';
+import { furtherStage, matchClient, phoneKey, type Lead, type LeadStage } from './leads';
 
 export interface ImpInfluencer { key: string; name: string; handle: string; email?: string; network?: string; closedAt?: string; coupon?: string }
 export interface ImpClient { key: string; name: string; email?: string; phone?: string; cpf?: string; status?: ClientStatus; notes?: string; channelId?: string; referredByKey?: string; isTest?: boolean }
@@ -25,13 +25,14 @@ export interface ImpSale {
   channelId?: string;
   notes?: string;
 }
-export interface ImpLead { key: string; name: string; phone?: string; email?: string; list?: string; originStage?: string; stage?: LeadStage; tags?: string[]; firstSeenAt?: string; lastContactAt?: string; lastFromMe?: boolean; notes?: string; channelId?: string }
+export interface ImpLead { key: string; name: string; phone?: string; email?: string; list?: string; originStage?: string; stage?: LeadStage; tags?: string[]; firstSeenAt?: string; lastContactAt?: string; lastFromMe?: boolean; notes?: string; channelId?: string; origin?: string; influencer?: string; lostReason?: string }
 /** Quem trouxe a cliente (influencer ou outra aluna), pelo nome */
 export interface ImpReferral { client: string; by: string }
 export interface ImpCampaign extends Omit<Campaign, 'id' | 'createdAt' | 'updatedAt'> { key: string }
 export interface ImpOkr extends Omit<Okr, 'id' | 'createdAt' | 'updatedAt'> { key: string }
+export interface ImpOrigin { name: string; url?: string; network?: string; campaign?: string; description?: string; influencer?: string; kind?: OriginKind }
 export interface ImpGoal { year: number; month: number; channelId: string; weeks: { revenue: number; sales?: number }[] }
-export interface ImportPayload { source: string; influencers?: ImpInfluencer[]; clients?: ImpClient[]; sales?: ImpSale[]; leads?: ImpLead[]; goals?: ImpGoal[]; referrals?: ImpReferral[]; campaigns?: ImpCampaign[]; okrs?: ImpOkr[] }
+export interface ImportPayload { source: string; influencers?: ImpInfluencer[]; clients?: ImpClient[]; sales?: ImpSale[]; leads?: ImpLead[]; goals?: ImpGoal[]; referrals?: ImpReferral[]; campaigns?: ImpCampaign[]; okrs?: ImpOkr[]; origins?: ImpOrigin[] }
 
 type WithId<T> = T & { id: string };
 export interface Existing {
@@ -41,7 +42,7 @@ export interface Existing {
   sales: (Pick<Sale, 'id' | 'clientId' | 'date' | 'gross'> & { importKey?: string; influencerId?: string })[];
   campaigns?: { id: string }[];
   okrs?: { id: string }[];
-  leads?: Pick<Lead, 'id' | 'name' | 'phone' | 'email' | 'list' | 'tags' | 'deleted' | 'stage' | 'clientId' | 'lastContactAt'>[];
+  leads?: (Pick<Lead, 'id' | 'name' | 'phone' | 'email' | 'list' | 'tags' | 'deleted' | 'stage' | 'clientId' | 'lastContactAt'> & Partial<Pick<Lead, 'origin' | 'influencerId' | 'firstSeenAt'>>)[];
 }
 
 export interface ImportPlan {
@@ -60,6 +61,8 @@ export interface ImportPlan {
   saleUpdates: { id: string; data: Partial<Sale> }[];
   campaigns: WithId<Omit<Campaign, 'id' | 'createdAt' | 'updatedAt'>>[];
   okrs: WithId<Omit<Okr, 'id' | 'createdAt' | 'updatedAt'>>[];
+  /** Origens rastreadas (vão para a configuração da consultoria) */
+  origins: TrackedOrigin[];
   skipped: { influencers: number; clients: number; sales: number; leads: number };
   warnings: string[];
 }
@@ -81,7 +84,7 @@ export function periodFromName(name: string): Period | null {
 }
 
 export function planImport(p: ImportPayload, ex: Existing, opts: { productId: string; today: string; by: string; newId: () => string }): ImportPlan {
-  const out: ImportPlan = { influencers: [], plans: [], clients: [], sales: [], clientUpdates: [], leads: [], leadUpdates: [], goals: [], saleUpdates: [], campaigns: [], okrs: [], skipped: { influencers: 0, clients: 0, sales: 0, leads: 0 }, warnings: [] };
+  const out: ImportPlan = { influencers: [], plans: [], clients: [], sales: [], clientUpdates: [], leads: [], leadUpdates: [], goals: [], saleUpdates: [], campaigns: [], okrs: [], origins: [], skipped: { influencers: 0, clients: 0, sales: 0, leads: 0 }, warnings: [] };
   const src = p.source;
 
   // Influencers: casa por @ ou e-mail
@@ -215,9 +218,17 @@ export function planImport(p: ImportPayload, ex: Existing, opts: { productId: st
       if (isNew) isNew.phone = l.phone.replace(/\D/g, '');
       else out.clientUpdates.push({ id: client.id, data: { phone: l.phone.replace(/\D/g, '') } });
     }
+    const infId = l.influencer ? (() => { const h = ex.influencers.filter((i) => nameTokens(i.name).join(' ') === nameTokens(l.influencer).join(' ') || handleKey(i.handle) === handleKey(l.influencer)); return h.length === 1 ? h[0].id : undefined; })() : undefined;
+    if (l.influencer && !infId) out.warnings.push(`Lead ${l.name || l.phone}: influencer "${l.influencer}" não encontrada`);
     if (exist) {
       out.skipped.leads++;
       const data: Partial<Lead> = {};
+      if (l.stage && !client) { const st = furtherStage(exist.stage, l.stage); if (st !== exist.stage) data.stage = st; }
+      if (data.stage === 'perdido' && l.lostReason) data.lostReason = l.lostReason;
+      if (l.origin && !exist.origin) data.origin = l.origin;
+      if (infId && !exist.influencerId) data.influencerId = infId;
+      if (l.channelId && !exist.influencerId && infId) data.channelId = l.channelId;
+      if (l.firstSeenAt && exist.firstSeenAt && l.firstSeenAt < exist.firstSeenAt) data.firstSeenAt = l.firstSeenAt;
       const generic = !exist.list || /sem etiqueta|sem lista/i.test(exist.list);
       if (generic && l.list) data.list = l.list;
       const tags = [...new Set([...(exist.tags ?? []), ...(l.tags ?? []), ...(l.list && l.list !== exist.list && !data.list ? [l.list] : [])])];
@@ -235,7 +246,7 @@ export function planImport(p: ImportPayload, ex: Existing, opts: { productId: st
       source: src.split(':')[0], list: l.list || undefined, originStage: l.originStage || undefined,
       stage: client ? 'convertido' : (l.stage ?? 'novo'), tags: l.tags?.length ? l.tags : undefined,
       firstSeenAt: l.firstSeenAt || undefined, lastContactAt: l.lastContactAt || undefined, lastFromMe: l.lastFromMe, notes: l.notes || undefined, channelId: l.channelId || undefined,
-      clientId: client?.id,
+      clientId: client?.id, origin: l.origin || undefined, influencerId: infId, lostReason: l.stage === 'perdido' ? l.lostReason : undefined,
       ...(byName ? { notes: [l.notes, 'Ligada à aluna pelo nome'].filter(Boolean).join(' · ') } : {}),
     });
   }
@@ -267,6 +278,18 @@ export function planImport(p: ImportPayload, ex: Existing, opts: { productId: st
     const by = live.find((x) => x.id !== c.id && sameName(x.name, r.by));
     if (by) { if (!c.referredById) upd({ referredById: by.id }); continue; }
     out.warnings.push(`Indicação de "${r.client}": "${r.by}" não é influencer nem aluna cadastrada`);
+  }
+  // Origens rastreadas
+  for (const o of p.origins ?? []) {
+    if (!o.name?.trim()) continue;
+    const inf = o.influencer ? findOne(ex.influencers, o.influencer) ?? ex.influencers.find((i) => handleKey(i.handle) === handleKey(o.influencer)) : undefined;
+    if (o.influencer && !inf) out.warnings.push(`Origem "${o.name}": influencer "${o.influencer}" não encontrada (fica sem ligação)`);
+    const id = norm(o.name).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    out.origins.push({
+      id, name: o.name.trim(), kind: o.kind ?? (inf ? 'influencer' : originKind(o.name, o.campaign)), source: src.split(':')[0],
+      ...(o.url ? { url: o.url } : {}), ...(o.network ? { network: o.network } : {}), ...(o.campaign ? { campaign: o.campaign } : {}),
+      ...(o.description ? { description: o.description } : {}), ...(inf ? { influencerId: inf.id } : {}),
+    });
   }
   // Campanhas e OKRs (não repete o que já veio)
   for (const c of p.campaigns ?? []) {

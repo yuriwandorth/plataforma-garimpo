@@ -24,6 +24,8 @@ export interface Tenant {
   whatsapp?: string;
   /** Cor principal da marca (#RRGGBB) */
   brandColor?: string;
+  /** Origens rastreadas (links da bio, stories, campanhas, influencers) */
+  origins?: import('./growth').TrackedOrigin[];
 }
 
 export interface Member {
